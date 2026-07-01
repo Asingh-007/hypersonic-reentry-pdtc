@@ -1,0 +1,5 @@
+CompileFlags:
+  Add:
+    - "-IC:/libs/eigen-5.0.0/eigen-5.0.0"
+    - "-xc++"
+    - "-std=c++20"
