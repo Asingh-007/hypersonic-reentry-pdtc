@@ -1,6 +1,7 @@
 #include "dynamics.h"
 #include <iostream>
 #include <Eigen/Dense>
+#include <clarabel.hpp>
 
 using Eigen::MatrixXd;
 

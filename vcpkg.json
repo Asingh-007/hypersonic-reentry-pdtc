@@ -1,0 +1,9 @@
+{
+  "name": "hypersonic-reentry-pdtc",
+  "version": "0.1.0",
+  "builtin-baseline": "d87340acc46bdeda386037b38aca30136e667e47",
+  "dependencies": [
+    "eigen3",
+    "matplotplusplus"
+  ]
+}
