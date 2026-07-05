@@ -4,6 +4,7 @@
 #include "PlanetConfig.h"
 #include "SpacecraftConfig.h"
 #include "ControlInputs.h"
+#include "QuaternionUtils.h"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -73,11 +74,9 @@ class DescentDynamics {
         static StateVector toVector(const DescentState& s);
         static DescentState fromVector(const StateVector& v);
 
-        // Quaternion kinematics: qdot = 0.5 * q (x) [0, wx, wy, wz] (Hamilton
-        // product), equivalent to qdot = 0.5*Omega(w)*q. q must be the
-        // body-to-inertial attitude quaternion; wx,wy,wz are body-axis rates.
-        static Eigen::Quaterniond quaternionDerivative(const Eigen::Quaterniond& q,
-                                                        double wx, double wy, double wz);
+        // Density at radial distance r, delegating to the atmosphere model
+        // selected by planet_config_.body (Earth US76 or Mars exponential).
+        double atmosphereDensity(double r) const;
 };
 
 #endif

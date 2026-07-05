@@ -2,6 +2,7 @@
 #include "SpacecraftConfig.h"
 #include "PlanetConfig.h"
 #include "ControlInputs.h"
+#include "AtmosphereModel.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -22,15 +23,12 @@ DescentState DescentDynamics::fromVector(const StateVector& v) {
         static_cast<float>(v(10)), static_cast<float>(v(11)), static_cast<float>(v(12)));
 }
 
-Eigen::Quaterniond DescentDynamics::quaternionDerivative(const Eigen::Quaterniond& q,
-                                                          double wx, double wy, double wz) {
-    // qdot = 0.5 * q (x) [0, wx, wy, wz]  (Hamilton product form of qdot = 0.5*Omega(w)*q,
-    // for a body-to-inertial quaternion with rates expressed in body axes).
-    // Order matters here: q * omega, not omega * q.
-    Eigen::Quaterniond omega(0.0, wx, wy, wz); // w()=0, x()=wx, y()=wy, z()=wz
-    Eigen::Quaterniond qdot = q * omega; // Hamilton product
-    qdot.coeffs() *= 0.5;
-    return qdot;
+double DescentDynamics::atmosphereDensity(double r) const {
+    double altitude = r - planet_config_.radius;
+    if (planet_config_.body == PlanetBody::Mars) {
+        return MarsAtmosphereExponential::Compute(altitude).density;
+    }
+    return EarthAtmosphere1976::Compute(altitude).density;
 }
 
 DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
@@ -48,26 +46,30 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
     double pitch = control_inputs.pitch;
     double yaw = control_inputs.yaw;
 
-    // Spherical (non-oblate) gravity model using the planet's gravitational
-    // parameter mu. This ignores J2/oblateness; a full oblate-Earth model
-    // would add latitude-dependent terms and a nonzero g_lambda below.
-    double g_r = planet_config_.mu / (r * r);
-    double g_lambda = 0.0; // zero under the spherical-gravity assumption above;
-                            // nonzero only if/when an oblate/J2 gravity model is added
+    // J2 (oblateness) gravity perturbation model, superseding the prior
+    // spherical/non-oblate assumption (g_lambda is no longer hardcoded to
+    // zero). r_ref reuses PlanetConfig::radius as the single reference
+    // radius -- this model doesn't distinguish equatorial/mean/polar radius.
+    double mu = planet_config_.mu;
+    double j2 = planet_config_.j2;
+    double r_ref = planet_config_.radius;
+    double sin_la = std::sin(la), cos_la = std::cos(la);
+    double r_ratio = r_ref / r;
+    double g_r = (mu / (r * r)) * (1.0 - 3.0 * j2 * (r_ratio * r_ratio) * 0.5 * (3.0 * sin_la * sin_la - 1.0));
+    double g_lambda = (3.0 * mu / (r * r)) * j2 * (r_ratio * r_ratio) * cos_la * sin_la;
 
-    double rho_0 = planet_config_.rho_0;
-    double h_scale = planet_config_.h_scale;
-    double planet_radius = planet_config_.radius;
     double omega = planet_config_.omega;
     double area = spacecraft_config_.area;
     double c_d = spacecraft_config_.c_d;
     double c_l = spacecraft_config_.c_l;
     double mass = spacecraft_config_.mass;
 
-    // Aerodynamic model: existing constant-Cd/Cl formulation (unchanged).
+    // Aerodynamic model: existing constant-Cd/Cl formulation (unchanged),
+    // density now from the real atmosphere model instead of a placeholder
+    // single exponential.
     // TODO: replace with a panel-based modified-Newtonian model once vehicle
     // geometry/panel data is available.
-    double rho = rho_0 * std::exp(-(r - planet_radius) / h_scale);
+    double rho = atmosphereDensity(r);
     double lift = 0.5 * rho * v * v * area * c_l;
     double drag = 0.5 * rho * v * v * area * c_d;
 
@@ -93,7 +95,7 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
 
     // Quaternion kinematics.
     Eigen::Quaterniond q(q4, q1, q2, q3); // Eigen ctor is (w,x,y,z); q4 is the scalar part
-    Eigen::Quaterniond qdot = quaternionDerivative(q, wx, wy, wz);
+    Eigen::Quaterniond qdot = QuaternionDerivative(q, wx, wy, wz);
 
     // Rotational dynamics: torque-free Euler's equation (tau_aero = 0).
     // TODO: tau_aero = 0 (torque-free) -- no panel/geometry data exists yet
@@ -128,7 +130,7 @@ DescentDynamics::TrajectoryHistory DescentDynamics::integrate(
         hist.v.push_back(s.v); hist.fpa.push_back(s.fpa); hist.v_azi.push_back(s.v_azi);
         hist.q1.push_back(s.q1); hist.q2.push_back(s.q2); hist.q3.push_back(s.q3); hist.q4.push_back(s.q4);
         hist.wx.push_back(s.wx); hist.wy.push_back(s.wy); hist.wz.push_back(s.wz);
-        double rho = planet_config_.rho_0 * std::exp(-(s.r - planet_config_.radius) / planet_config_.h_scale);
+        double rho = atmosphereDensity(s.r);
         hist.qbar.push_back(0.5 * rho * s.v * s.v);
     };
 

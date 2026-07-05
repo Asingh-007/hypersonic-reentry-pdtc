@@ -23,7 +23,7 @@ int main() {
     }
 
     // Set up initial configurations for the simulation
-    PlanetConfig earth_config(6371000.0f, 3.986e14f, 1.225f, 8500.0f, 9.80665f, 7.2921159e-5f);
+    PlanetConfig earth_config = PlanetConfig::Earth();
     SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, 1000.0f, 1000.0f, 1500.0f);
     DescentDynamics descent_dynamics(earth_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.1f, 0.1f);
