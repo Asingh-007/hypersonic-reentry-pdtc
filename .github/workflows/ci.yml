@@ -12,9 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone and bootstrap vcpkg
+      - name: Prepare and bootstrap vcpkg
+        # windows-latest runners already have vcpkg preinstalled at C:/vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg C:/vcpkg
+          if (Test-Path "C:/vcpkg/.git") {
+            git -C C:/vcpkg fetch --unshallow origin 2>$null
+            git -C C:/vcpkg fetch origin
+            git -C C:/vcpkg checkout master
+            git -C C:/vcpkg reset --hard origin/master
+          } else {
+            Remove-Item -Recurse -Force C:/vcpkg -ErrorAction SilentlyContinue
+            git clone https://github.com/microsoft/vcpkg C:/vcpkg
+          }
           C:/vcpkg/bootstrap-vcpkg.bat
 
       - name: Configure
