@@ -5,6 +5,7 @@
 #include "SpacecraftConfig.h"
 #include "ControlInputs.h"
 #include "QuaternionUtils.h"
+#include "AeroAngles.h"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -77,6 +78,22 @@ class DescentDynamics {
         // Density at radial distance r, delegating to the atmosphere model
         // selected by planet_config_.body (Earth US76 or Mars exponential).
         double atmosphereDensity(double r) const;
+
+        // Speed of sound at radial distance r, needed for the Mach number
+        // fed into aero_table lookups.
+        // PLACEHOLDER: EarthAtmosphere1976 (Olsen & Bettinger 2022) is a
+        // density-only model and does not provide temperature, so speed of
+        // sound cannot be derived from it directly. This uses the standard
+        // 1976 US Standard Atmosphere temperature-lapse relation (valid to
+        // 84 km; held constant above that) purely to get a Mach number for
+        // aero-table lookups -- it is NOT consistent with
+        // EarthAtmosphere1976's own density curve fit (derived from a
+        // different underlying paper/model) and should be replaced with a
+        // proper T(h) model consistent with the density model once one
+        // exists. For Mars, MarsAtmosphereExponential::Compute() already
+        // returns a temperature (constant), used directly with CO2's gas
+        // constant and specific-heat ratio.
+        double speedOfSound(double r) const;
 };
 
 #endif

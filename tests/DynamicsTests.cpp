@@ -6,6 +6,11 @@
 #include "QuaternionUtils.h"
 #include <cmath>
 
+// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
+// <cmath>/<math.h> include anywhere in the translation unit -- use an
+// explicit local constant instead (same fix as main.cpp).
+constexpr double kPi = 3.14159265358979323846;
+
 TEST(QuaternionUtilsTest, KnownValueIdentityQuaternionUnitXRate) {
     Eigen::Quaterniond identity(1.0, 0.0, 0.0, 0.0); // w,x,y,z
     Eigen::Quaterniond qdot = QuaternionDerivative(identity, 1.0, 0.0, 0.0);
@@ -16,12 +21,28 @@ TEST(QuaternionUtilsTest, KnownValueIdentityQuaternionUnitXRate) {
 }
 
 namespace {
+
+std::string TestAeroTablePath() {
+    return std::string(TESTS_SOURCE_DIR) + "/tests/fixtures/aero_table_test.csv";
+}
+
+SpacecraftConfig MakeTestSpacecraftConfig(const Eigen::Matrix3d& inertia) {
+    double S_ref = kPi * 4.5 * 4.5;
+    double L_ref = 9.0;
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    return SpacecraftConfig(1000.0f, inertia, S_ref, L_ref, moment_ref, TestAeroTablePath());
+}
+
+// altitude_m defaults to 100 km (used by tests that don't care about the
+// magnitude of aerodynamic forces/torques, just general dynamics behavior).
 DescentState MakeNominalState(float q1, float q2, float q3, float q4,
-                               float wx, float wy, float wz) {
+                               float wx, float wy, float wz,
+                               float altitude_m = 100000.0f) {
     return DescentState(
-        PlanetConfig::Earth().radius + 100000.0f, 0.0f, 0.0f, 1000.0f, -0.05f, 0.0f,
+        PlanetConfig::Earth().radius + altitude_m, 0.0f, 0.0f, 1000.0f, -0.05f, 0.0f,
         q1, q2, q3, q4, wx, wy, wz);
 }
+
 }
 
 TEST(DescentDynamicsTest, RoundTripThroughZeroDurationIntegrate) {
@@ -30,7 +51,7 @@ TEST(DescentDynamicsTest, RoundTripThroughZeroDurationIntegrate) {
     // the initial condition, converted to a StateVector and back -- with no
     // integration step taken.
     PlanetConfig planet_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, 1000.0f, 1000.0f, 1500.0f);
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal());
     DescentDynamics dynamics(planet_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.0f, 0.0f);
 
@@ -48,12 +69,16 @@ TEST(DescentDynamicsTest, RoundTripThroughZeroDurationIntegrate) {
 }
 
 TEST(DescentDynamicsTest, TorqueFreeSymmetricBodyWithZeroSpinStaysAtRest) {
+    // Tested at a very high altitude (above the atmosphere model's upper
+    // bound, where density -- and hence qbar/tau_aero -- is exactly zero
+    // regardless of the aero table's contents) so this remains a pure test
+    // of the torque-free rotational math itself, independent of aero data.
     PlanetConfig planet_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, /*ixx=*/1000.0f, /*iyy=*/1000.0f, /*izz=*/1500.0f);
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal()); // ixx=iyy
     DescentDynamics dynamics(planet_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.0f, 0.0f);
 
-    DescentState state = MakeNominalState(0.0f, 0.0f, 0.0f, 1.0f, 0.01f, 0.01f, 0.0f);
+    DescentState state = MakeNominalState(0.0f, 0.0f, 0.0f, 1.0f, 0.01f, 0.01f, 0.0f, /*altitude_m=*/2000000.0f);
     DescentDynamics::StateVector x;
     x << state.r, state.la, state.lo, state.v, state.fpa, state.v_azi,
          state.q1, state.q2, state.q3, state.q4, state.wx, state.wy, state.wz;
@@ -66,16 +91,18 @@ TEST(DescentDynamicsTest, TorqueFreeSymmetricBodyWithZeroSpinStaysAtRest) {
 }
 
 TEST(DescentDynamicsTest, AngularMomentumMagnitudeConservedUnderTorqueFreeMotion) {
-    // Invariant of torque-free rigid-body motion: |J*w| stays
-    // constant. Uses asymmetric inertia and nonzero rates on all three axes
-    // so the check actually exercises coupled rotational dynamics, not the
-    // degenerate zero-motion case above.
+    // Invariant of torque-free rigid-body motion: |J*w| stays constant.
+    // Tested at a very high altitude (same reasoning as the test above) so
+    // tau_aero is exactly zero and this remains a pure test of the
+    // rotational math, using asymmetric inertia and nonzero rates on all
+    // three axes so the check actually exercises coupled dynamics.
     PlanetConfig planet_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, /*ixx=*/800.0f, /*iyy=*/1000.0f, /*izz=*/1500.0f);
+    Eigen::Matrix3d inertia = Eigen::Vector3d(800.0, 1000.0, 1500.0).asDiagonal();
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(inertia);
     DescentDynamics dynamics(planet_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.0f, 0.0f);
 
-    DescentState initial = MakeNominalState(0.0f, 0.0f, 0.0f, 1.0f, 0.05f, 0.03f, 0.02f);
+    DescentState initial = MakeNominalState(0.0f, 0.0f, 0.0f, 1.0f, 0.05f, 0.03f, 0.02f, /*altitude_m=*/2000000.0f);
     auto history = dynamics.integrate(initial, control_inputs, 0.0, 5.0, 0.1, 1e-8);
 
     ASSERT_GT(history.t.size(), 1u);
@@ -93,7 +120,7 @@ TEST(DescentDynamicsTest, AngularMomentumMagnitudeConservedUnderTorqueFreeMotion
 
 TEST(DescentDynamicsTest, QuaternionNormStaysNearOneOverShortRun) {
     PlanetConfig planet_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, 1000.0f, 1000.0f, 1500.0f);
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal());
     DescentDynamics dynamics(planet_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.0f, 0.0f);
 
@@ -110,7 +137,7 @@ TEST(DescentDynamicsTest, QuaternionNormStaysNearOneOverShortRun) {
 
 TEST(DescentDynamicsTest, NoNaNOverNominalEntryInterfaceRun) {
     PlanetConfig planet_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, 1000.0f, 1000.0f, 1500.0f);
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal());
     DescentDynamics dynamics(planet_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.1f, 0.1f);
 
@@ -127,4 +154,30 @@ TEST(DescentDynamicsTest, NoNaNOverNominalEntryInterfaceRun) {
         EXPECT_TRUE(std::isfinite(history.wx[i])) << "at t=" << history.t[i];
         EXPECT_TRUE(std::isfinite(history.qbar[i])) << "at t=" << history.t[i];
     }
+}
+
+TEST(DescentDynamicsTest, DerivativesProducesNonzeroTauAeroAndSensibleLiftDragAtNonzeroAlpha) {
+    // At a low, dense-atmosphere altitude with the vehicle's nose tilted
+    // relative to the velocity vector (nonzero alpha), derivatives() should
+    // now produce nonzero aero-driven wdot (unlike the old torque-free
+    // model) and nonzero, finite lift/drag-influenced translational rates.
+    PlanetConfig planet_config = PlanetConfig::Earth();
+    SpacecraftConfig spacecraft_config = MakeTestSpacecraftConfig(Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal());
+    DescentDynamics dynamics(planet_config, spacecraft_config);
+    ThrustVectorControlInputs control_inputs(0.0f, 0.0f, 0.0f);
+
+    // Identity attitude with fpa=-0.05 rad gives a nonzero angle of attack
+    // (body nose not aligned with the velocity direction).
+    DescentState state = MakeNominalState(0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, /*altitude_m=*/30000.0f);
+    DescentDynamics::StateVector x;
+    x << state.r, state.la, state.lo, state.v, state.fpa, state.v_azi,
+         state.q1, state.q2, state.q3, state.q4, state.wx, state.wy, state.wz;
+
+    DescentDynamics::StateVector xdot = dynamics.derivatives(x, control_inputs);
+
+    // wdot should no longer be trivially zero now that tau_aero is real.
+    bool any_nonzero_wdot = std::abs(xdot(10)) > 1e-12 || std::abs(xdot(11)) > 1e-12 || std::abs(xdot(12)) > 1e-12;
+    EXPECT_TRUE(any_nonzero_wdot);
+    EXPECT_TRUE(std::isfinite(xdot(3))); // v_dot finite (lift/drag applied)
+    EXPECT_TRUE(std::isfinite(xdot(4))); // fpa_dot finite
 }

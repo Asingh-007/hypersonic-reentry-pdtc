@@ -4,11 +4,18 @@
 #include <string>
 #include <cstdlib>
 #include <filesystem>
+#include <Eigen/Dense>
 #include "DescentDynamics.h"
 #include "SpacecraftConfig.h"
 #include "PlanetConfig.h"
 #include "ControlInputs.h"
 #include <matplot/matplot.h>
+
+// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
+// <cmath>/<math.h> include anywhere in the translation unit, which is
+// fragile to guarantee across header inclusion order -- use an explicit
+// local constant instead.
+constexpr double kPi = 3.14159265358979323846;
 
 int main() {
     // Append gnuplot's bin directory to PATH so matplot++ can find it
@@ -22,9 +29,24 @@ int main() {
         _putenv_s("PATH", new_path.c_str());
     }
 
+    // Resolved once, up front, since both the aero table path below and the
+    // plot output directory later need a location independent of the
+    // process' runtime working directory (see the outputs/ note further down).
+    std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
+
     // Set up initial configurations for the simulation
     PlanetConfig earth_config = PlanetConfig::Earth();
-    SpacecraftConfig spacecraft_config(1000.0f, 10.0f, 0.5f, 0.3f, 1000.0f, 1000.0f, 1500.0f);
+    // Inertia/S_ref/L_ref/moment_ref are PLACEHOLDERS matching
+    // aero_model::testutil::makeCylinderNoseFlapBody()'s default geometry --
+    // see SpacecraftConfig.h. aero_table.csv is generated offline by
+    // aero_table_gen (see aero/GenerateAeroTable.cpp); run that once before
+    // running this if the CSV doesn't exist yet.
+    Eigen::Matrix3d inertia = Eigen::Vector3d(1000.0, 1000.0, 1500.0).asDiagonal();
+    double S_ref = kPi * 4.5 * 4.5;
+    double L_ref = 9.0;
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    std::string aero_table_path = (source_dir / "aero" / "data" / "aero_table.csv").generic_string();
+    SpacecraftConfig spacecraft_config(1000.0f, inertia, S_ref, L_ref, moment_ref, aero_table_path);
     DescentDynamics descent_dynamics(earth_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.1f, 0.1f);
 
@@ -47,11 +69,10 @@ int main() {
     std::cout << "Integration complete: " << history.t.size() << " recorded points." << std::endl;
     std::cout << "Final: r = " << history.r.back() << ", v = " << history.v.back() << std::endl;
 
-    constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+    constexpr double kRadToDeg = 180.0 / kPi;
     const size_t n = history.t.size();
 
     // Set up output directory for plots
-    std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
     std::filesystem::path output_dir = source_dir / "outputs";
     std::filesystem::create_directories(output_dir);
 

@@ -7,6 +7,11 @@
 #include <algorithm>
 #include <iostream>
 
+// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
+// <cmath>/<math.h> include anywhere in the translation unit -- use an
+// explicit local constant instead (same fix as main.cpp).
+constexpr double kPi = 3.14159265358979323846;
+
 DescentDynamics::StateVector DescentDynamics::toVector(const DescentState& s) {
     StateVector v;
     v << s.r, s.la, s.lo, s.v, s.fpa, s.v_azi,
@@ -29,6 +34,25 @@ double DescentDynamics::atmosphereDensity(double r) const {
         return MarsAtmosphereExponential::Compute(altitude).density;
     }
     return EarthAtmosphere1976::Compute(altitude).density;
+}
+
+double DescentDynamics::speedOfSound(double r) const {
+    if (planet_config_.body == PlanetBody::Mars) {
+        // MarsAtmosphereExponential's temperature is a constant, not a real
+        // altitude profile (see AtmosphereModel.h).
+        double T = MarsAtmosphereExponential::kRefTemperatureK;
+        constexpr double gamma_co2 = 1.29;
+        return std::sqrt(gamma_co2 * MarsAtmosphereExponential::kRCO2 * T);
+    }
+    // PLACEHOLDER (see speedOfSound() doc comment in DescentDynamics.h):
+    // simple two-segment standard-atmosphere temperature lapse (troposphere
+    // lapse rate below 11 km, held constant above), NOT the same model
+    // EarthAtmosphere1976 uses for density.
+    double altitude = r - planet_config_.radius;
+    constexpr double T0 = 288.15, lapse_rate = 0.0065, h_tropopause = 11000.0, T_tropopause = 216.65;
+    double T = (altitude < h_tropopause) ? (T0 - lapse_rate * altitude) : T_tropopause;
+    constexpr double gamma_air = 1.4, R_air = 287.0528;
+    return std::sqrt(gamma_air * R_air * T);
 }
 
 DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
@@ -59,19 +83,32 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
     double g_lambda = (3.0 * mu / (r * r)) * j2 * (r_ratio * r_ratio) * cos_la * sin_la;
 
     double omega = planet_config_.omega;
-    double area = spacecraft_config_.area;
-    double c_d = spacecraft_config_.c_d;
-    double c_l = spacecraft_config_.c_l;
     double mass = spacecraft_config_.mass;
 
-    // Aerodynamic model: existing constant-Cd/Cl formulation (unchanged),
-    // density now from the real atmosphere model instead of a placeholder
-    // single exponential.
-    // TODO: replace with a panel-based modified-Newtonian model once vehicle
-    // geometry/panel data is available.
+    // Quaternion (needed by both the aero angle-of-attack extraction below
+    // and the quaternion kinematics further down -- constructed once here).
+    Eigen::Quaterniond q(q4, q1, q2, q3); // Eigen ctor is (w,x,y,z); q4 is the scalar part
+
+    // Aerodynamic model: coefficients come from a precomputed, geometry-based
+    // Newtonian-panel (to be offline-corrected once real CFD data exists)
+    // lookup table -- see AeroCoefficientTable.h / aero/GenerateAeroTable.cpp.
+    // Density from the real atmosphere model as before.
     double rho = atmosphereDensity(r);
-    double lift = 0.5 * rho * v * v * area * c_l;
-    double drag = 0.5 * rho * v * v * area * c_d;
+    double a_sound = speedOfSound(r); // PLACEHOLDER -- see speedOfSound() comment
+    double mach = v / a_sound;
+
+    AeroAngles angles = ComputeAeroAngles(q, fpa, v_azi);
+    double alpha_deg = angles.alpha_rad * 180.0 / kPi;
+    double beta_deg = angles.beta_rad * 180.0 / kPi;
+    double flap_deg = 0.0; // PLACEHOLDER -- no flap control state exists yet
+                            // (ThrustVectorControlInputs has no flap field);
+                            // flagged future control-allocation hook, not fabricated.
+
+    auto aero = spacecraft_config_.aero_table.interpolate(mach, alpha_deg, beta_deg, flap_deg);
+
+    double qbar = 0.5 * rho * v * v;
+    double lift = qbar * spacecraft_config_.S_ref * aero.CL;
+    double drag = qbar * spacecraft_config_.S_ref * aero.CD;
 
     double r_dot = v * std::sin(fpa);
     double la_dot = v / r * std::cos(fpa) * std::cos(v_azi);
@@ -93,18 +130,25 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
                         + 2 * mass * omega * v * std::sin(v_azi) * std::cos(la);
     double fpa_dot = fpa_dot_term / (mass * v);
 
-    // Quaternion kinematics.
-    Eigen::Quaterniond q(q4, q1, q2, q3); // Eigen ctor is (w,x,y,z); q4 is the scalar part
+    // Quaternion kinematics (q constructed earlier, reused for the aero
+    // angle-of-attack extraction above).
     Eigen::Quaterniond qdot = QuaternionDerivative(q, wx, wy, wz);
 
-    // Rotational dynamics: torque-free Euler's equation (tau_aero = 0).
-    // TODO: tau_aero = 0 (torque-free) -- no panel/geometry data exists yet
-    // to compute aerodynamic torque about the center of mass. Once panel
-    // geometry and a center-of-pressure model exist, add tau_aero here and
-    // change this to J*wdot = tau_aero - w x (J*w).
+    // Rotational dynamics: real aerodynamic torque from the coefficient
+    // table, replacing the prior torque-free assumption now that panel/
+    // geometry-derived coefficients exist. tau_aero is computed about
+    // spacecraft_config_.moment_ref in body axes, consistent with
+    // NewtonianAeroModel's body-axis convention (x=nose, y=pitch axis, z
+    // completes right-handed triad) -- see AeroAngles.h for the modeling
+    // assumption linking DescentState's quaternion to this frame.
+    Eigen::Vector3d tau_aero(
+        qbar * spacecraft_config_.S_ref * spacecraft_config_.L_ref * aero.Cl_roll,
+        qbar * spacecraft_config_.S_ref * spacecraft_config_.L_ref * aero.Cm,
+        qbar * spacecraft_config_.S_ref * spacecraft_config_.L_ref * aero.Cn_yaw);
+
     Eigen::Vector3d w(wx, wy, wz);
-    Eigen::Matrix3d J = Eigen::Vector3d(spacecraft_config_.ixx, spacecraft_config_.iyy, spacecraft_config_.izz).asDiagonal();
-    Eigen::Vector3d wdot = J.inverse() * (-w.cross(J * w));
+    const Eigen::Matrix3d& J = spacecraft_config_.inertia; // already a full Matrix3d, no .asDiagonal() needed
+    Eigen::Vector3d wdot = J.inverse() * (tau_aero - w.cross(J * w));
 
     StateVector xdot;
     xdot << r_dot, la_dot, lo_dot, v_dot, fpa_dot, v_azi_dot,
