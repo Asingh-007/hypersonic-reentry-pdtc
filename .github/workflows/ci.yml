@@ -26,11 +26,31 @@ jobs:
           }
           C:/vcpkg/bootstrap-vcpkg.bat
 
+      - name: Set up MSVC developer environment
+        # windows-latest doesn't expose a Visual Studio "instance" that CMake's
+        # Visual Studio generator can find via vswhere, even though the MSVC
+        # toolset itself is present -- this sets up cl.exe/link.exe/etc. on
+        # PATH so the "ci" preset's Ninja generator can use them directly.
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Resolve MSVC compiler path
+        # Passing bare "cl" as CMAKE_C/CXX_COMPILER is unreliable here (an
+        # interaction between vcpkg's own internal compiler-hash probe and
+        # CMake's later bare-name PATH resolution for the project's actual
+        # compiler causes it to fail even when cl.exe is genuinely on PATH),
+        # so resolve the full path explicitly instead of relying on it.
+        run: |
+          $clPath = (Get-Command cl.exe).Source
+          echo "CL_PATH=$clPath" >> $env:GITHUB_ENV
+
       - name: Configure
-        run: cmake --preset default
+        run: cmake --preset ci -DCMAKE_C_COMPILER="$env:CL_PATH" -DCMAKE_CXX_COMPILER="$env:CL_PATH"
 
       - name: Build
-        run: cmake --build --preset default
+        run: cmake --build --preset ci
 
       - name: Run tests
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: ctest --test-dir build --output-on-failure

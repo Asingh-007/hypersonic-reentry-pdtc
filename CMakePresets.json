@@ -15,6 +15,20 @@
       }
     },
     {
+      "name": "ci",
+      "displayName": "Ninja (GitHub Actions CI)",
+      "description": "Used by .github/workflows/ci.yml. windows-latest runners don't expose a Visual Studio 'instance' vswhere/CMake's VS generator can find, even though the MSVC toolset is present -- Ninja + an explicit MSVC dev-environment setup (ilammy/msvc-dev-cmd) sidesteps that. Not for local use; the default preset already works locally.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "environment": {
+        "VCPKG_ROOT": "C:/vcpkg"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
       "name": "clangd-db",
       "displayName": "Ninja (compile_commands.json for clangd)",
       "description": "Not for building - just regenerate compile_commands.json for clangd. Run from a Developer Command Prompt (vcvarsall.bat) since the Ninja generator needs cl.exe/link.exe on PATH.",
@@ -39,6 +53,10 @@
     {
       "name": "default",
       "configurePreset": "default"
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci"
     }
   ]
 }
