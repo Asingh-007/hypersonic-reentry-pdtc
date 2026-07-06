@@ -27,6 +27,19 @@ double thetaBetaMachResidual(double beta, double mach_inf, double theta_rad, dou
          - 2.0 * cotb * (M2 * sinb * sinb - 1.0);
 }
 
+// Direct (non-residual) forward evaluation of theta(beta) -- the same
+// theta-beta-Mach relation, solved for theta given beta directly. Used
+// only for the cheap coarse-scan detachment pre-check below.
+double thetaOfBeta(double beta, double mach_inf, double gamma) {
+    const double M2 = mach_inf * mach_inf;
+    const double sinb = std::sin(beta);
+    const double cosb = std::cos(beta);
+    const double cotb = cosb / sinb;
+    return std::atan(2.0 * cotb * (M2 * sinb * sinb - 1.0) / (M2 * (gamma + std::cos(2.0 * beta)) + 2.0));
+}
+
+constexpr int kCoarseDetachmentSamples = 10;
+
 }  // namespace
 
 double prandtlMeyerNu(double mach, double gamma) {
@@ -69,6 +82,21 @@ std::optional<double> solveWeakObliqueShockBeta(double mach_inf, double theta_ra
     const double beta_lo = mach_angle + 1e-6;
     const double beta_hi = kPi / 2.0 - 1e-6;
     if (beta_lo >= beta_hi) return std::nullopt;
+
+    // Cheap upfront rejection: theta(beta) rises from 0 at the Mach angle to
+    // a single peak, then falls toward 0 at beta=pi/2. A coarse sample of
+    // that peak is enough to reject clearly-detached cases in ~10 direct
+    // evaluations instead of burning the full Newton iteration budget (real,
+    // non-idealized panel normals hit detachment often enough that this
+    // upfront check matters for runtime, not just theory).
+    double theta_max_sampled = 0.0;
+    for (int i = 1; i <= kCoarseDetachmentSamples; ++i) {
+        const double b = beta_lo + (beta_hi - beta_lo) * i / (kCoarseDetachmentSamples + 1);
+        theta_max_sampled = std::max(theta_max_sampled, thetaOfBeta(b, mach_inf, gamma));
+    }
+    if (theta_rad > theta_max_sampled + 0.02) {  // ~1.1deg margin for coarse-sampling error
+        return std::nullopt;
+    }
 
     double beta = std::min(beta_hi, mach_angle + 0.05);  // seed just above the Mach angle
     bool converged = false;

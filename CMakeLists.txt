@@ -59,6 +59,7 @@ add_executable(aero_table_gen
   aero/Kriging.cpp
   aero/LatinHypercubeSampler.cpp
   aero/StlMeshLoader.cpp
+  aero/SpacecraftGeometry.cpp
 )
 target_include_directories(aero_table_gen PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -85,6 +86,7 @@ add_executable(unit_tests
   aero/Kriging.cpp
   aero/LatinHypercubeSampler.cpp
   aero/StlMeshLoader.cpp
+  aero/SpacecraftGeometry.cpp
   aero/AeroAngles.cpp
   aero/AeroCoefficientTable.cpp
 )

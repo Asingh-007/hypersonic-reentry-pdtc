@@ -18,6 +18,7 @@
 #include "AeroRegimeDispatch.h"
 #include "TestBodyGenerator.h"
 #include "StlMeshLoader.h"
+#include "SpacecraftGeometry.h"
 #include "LatinHypercubeSampler.h"
 
 using namespace aero_model;
@@ -29,7 +30,12 @@ constexpr double kPi = 3.14159265358979323846;
 
 int main(int argc, char** argv) {
     // --- 1. Build the vehicle mesh ---
+    // Default: the real SolidWorks-exported geometry under geometry/ (see
+    // SpacecraftGeometry.h). argv[1], if given, overrides with a single
+    // STL file instead (body-only, no flap groups).
     PanelMesh mesh;
+    Eigen::Vector3d moment_ref;
+    double S_ref, L_ref, body_radius, body_length;
     if (argc > 1) {
         std::cout << "Loading mesh from STL: " << argv[1] << std::endl;
         mesh = LoadMeshFromStl(argv[1], /*group_id=*/0);
@@ -38,16 +44,26 @@ int main(int argc, char** argv) {
                      "2=fwd_right, 3=aft_left, 4=aft_right) or flap deflection "
                      "will have no geometric effect."
                   << std::endl;
+        moment_ref = Eigen::Vector3d(20.0, 0.0, 0.0);  // PLACEHOLDER, matches TestBodyGenerator
+        S_ref = kPi * 4.5 * 4.5;
+        L_ref = 9.0;
+        body_radius = 4.5;
+        body_length = 40.0;
     } else {
-        std::cout << "Using placeholder TestBodyGenerator body (no STL path given)." << std::endl;
-        mesh = testutil::makeCylinderNoseFlapBody();
+        const std::filesystem::path geometry_dir =
+            std::filesystem::path(__FILE__).parent_path().parent_path() / "geometry";
+        std::cout << "Loading real spacecraft geometry from " << geometry_dir << std::endl;
+        SpacecraftGeometry geo = LoadSpacecraftGeometry(geometry_dir.string());
+        mesh = geo.mesh;
+        moment_ref = geo.moment_ref;
+        S_ref = geo.S_ref;
+        L_ref = geo.L_ref;
+        body_radius = geo.body_radius;
+        body_length = geo.body_length;
+        std::cout << "  S_ref=" << S_ref << " L_ref=" << L_ref << " body_radius=" << body_radius
+                   << " body_length=" << body_length << " moment_ref=(" << moment_ref.transpose() << ")"
+                   << std::endl;
     }
-
-    const Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);  // approx CG, body frame -- PLACEHOLDER, matches TestBodyGenerator
-    const double S_ref = kPi * 4.5 * 4.5;              // reference area, m^2 -- PLACEHOLDER
-    const double L_ref = 9.0;                            // reference length, m -- PLACEHOLDER
-    const double body_radius = 4.5;                      // PLACEHOLDER, matches TestBodyGenerator defaults
-    const double body_length = 40.0;                     // PLACEHOLDER, matches TestBodyGenerator defaults
 
     // --- 2. Define the grid envelope ---
     // PLACEHOLDER ranges/resolution -- revisit once real mission envelopes

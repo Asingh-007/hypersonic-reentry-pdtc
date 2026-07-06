@@ -5,6 +5,7 @@
 #include "AeroRegimeDispatch.h"
 #include "TestBodyGenerator.h"
 #include "StlMeshLoader.h"
+#include "SpacecraftGeometry.h"
 #include "AeroCoefficientTable.h"
 #include "AeroAngles.h"
 #include "LatinHypercubeSampler.h"
@@ -127,6 +128,32 @@ TEST(AeroRegimeDispatchTest, AftDifferentialFlapProducesNonzeroRollInExpectedDir
     AeroCoefficients c_neg = model.evaluate(mesh, flap_defl_neg, 0.1, 0.0, 5.0,
                                               moment_ref, S_ref, L_ref);
     EXPECT_NEAR(c.Cl_roll, -c_neg.Cl_roll, 1e-9);
+}
+
+// ---------------------------------------------------------------------
+// Real spacecraft geometry (SolidWorks STL import)
+// ---------------------------------------------------------------------
+
+TEST(SpacecraftGeometryTest, LoadsRealGeometryWithExpectedGroupsAndSaneReferenceValues) {
+    const std::string geometry_dir = std::string(TESTS_SOURCE_DIR) + "/geometry";
+    SpacecraftGeometry geo = LoadSpacecraftGeometry(geometry_dir);
+
+    ASSERT_EQ(geo.mesh.groups().size(), 4u);
+    for (int id : {1, 2, 3, 4}) {
+        EXPECT_NE(geo.mesh.groups().find(id), geo.mesh.groups().end()) << "missing group id " << id;
+    }
+    EXPECT_GT(geo.mesh.panels().size(), 1000u);  // body (1804 tris) + 4 flaps (794 tris each)
+
+    // Sane magnitude checks (real vehicle is tens of meters long, a few
+    // meters in radius) -- not exact-value checks, since these are
+    // geometric placeholders derived from the mesh, not fixed constants.
+    EXPECT_GT(geo.body_length, 10.0);
+    EXPECT_LT(geo.body_length, 200.0);
+    EXPECT_GT(geo.body_radius, 0.5);
+    EXPECT_LT(geo.body_radius, 50.0);
+    EXPECT_GT(geo.S_ref, 0.0);
+    EXPECT_NEAR(geo.S_ref, kPi * geo.body_radius * geo.body_radius, 1e-9);
+    EXPECT_TRUE(geo.moment_ref.allFinite());
 }
 
 // ---------------------------------------------------------------------
