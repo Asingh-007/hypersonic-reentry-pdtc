@@ -54,6 +54,8 @@ add_executable(aero_table_gen
   aero/GenerateAeroTable.cpp
   aero/PanelGeometry.cpp
   aero/NewtonianAero.cpp
+  aero/ShockExpansionAero.cpp
+  aero/AeroRegimeDispatch.cpp
   aero/Kriging.cpp
   aero/LatinHypercubeSampler.cpp
   aero/StlMeshLoader.cpp
@@ -78,6 +80,8 @@ add_executable(unit_tests
   planet/PlanetConfig.cpp
   aero/PanelGeometry.cpp
   aero/NewtonianAero.cpp
+  aero/ShockExpansionAero.cpp
+  aero/AeroRegimeDispatch.cpp
   aero/Kriging.cpp
   aero/LatinHypercubeSampler.cpp
   aero/StlMeshLoader.cpp

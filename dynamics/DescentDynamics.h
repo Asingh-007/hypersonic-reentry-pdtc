@@ -86,7 +86,7 @@ class DescentDynamics {
         // sound cannot be derived from it directly. This uses the standard
         // 1976 US Standard Atmosphere temperature-lapse relation (valid to
         // 84 km; held constant above that) purely to get a Mach number for
-        // aero-table lookups -- it is NOT consistent with
+        // aero-table lookups -- it is not consistent with
         // EarthAtmosphere1976's own density curve fit (derived from a
         // different underlying paper/model) and should be replaced with a
         // proper T(h) model consistent with the density model once one

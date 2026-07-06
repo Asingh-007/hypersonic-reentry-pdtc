@@ -25,10 +25,9 @@ struct SpacecraftConfig {
     double L_ref = 0.0;                       // reference length, m
     Eigen::Vector3d moment_ref = Eigen::Vector3d::Zero(); // moment reference point, body frame (approx CG)
 
-    // Precomputed (mach, alpha_deg, beta_deg, flap_deg) -> AeroCoefficients
-    // lookup table, generated offline by aero/GenerateAeroTable.cpp.
-    // DescentDynamics queries this at runtime; it never evaluates
-    // NewtonianAeroModel or UniversalKriging directly.
+    // Precomputed (mach, alpha_deg, beta_deg, fwd_sym_deg, aft_sym_deg,
+    // aft_diff_deg) -> AeroCoefficients lookup table, generated offline by
+    // aero/GenerateAeroTable.cpp. DescentDynamics only ever queries this table.
     aero_model::AeroCoefficientTable aero_table;
 
     // NOTE: unlike every other config struct in this repo, this constructor

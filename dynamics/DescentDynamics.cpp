@@ -100,11 +100,12 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
     AeroAngles angles = ComputeAeroAngles(q, fpa, v_azi);
     double alpha_deg = angles.alpha_rad * 180.0 / kPi;
     double beta_deg = angles.beta_rad * 180.0 / kPi;
-    double flap_deg = 0.0; // PLACEHOLDER -- no flap control state exists yet
-                            // (ThrustVectorControlInputs has no flap field);
-                            // flagged future control-allocation hook, not fabricated.
+    // PLACEHOLDER -- no flap control state exists yet (ThrustVectorControlInputs
+    // has no fwd/aft flap fields), so all 3 flap axes are hardcoded to 0.
+    double fwd_sym_deg = 0.0, aft_sym_deg = 0.0, aft_diff_deg = 0.0;
 
-    auto aero = spacecraft_config_.aero_table.interpolate(mach, alpha_deg, beta_deg, flap_deg);
+    auto aero = spacecraft_config_.aero_table.interpolate(mach, alpha_deg, beta_deg,
+                                                            fwd_sym_deg, aft_sym_deg, aft_diff_deg);
 
     double qbar = 0.5 * rho * v * v;
     double lift = qbar * spacecraft_config_.S_ref * aero.CL;

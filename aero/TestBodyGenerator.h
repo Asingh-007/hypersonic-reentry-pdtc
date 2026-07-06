@@ -2,14 +2,10 @@
 #define TEST_BODY_GENERATOR_H
 // TestBodyGenerator.h
 //
-// Procedurally builds a crude cylinder-plus-nose-cap body with one flap
-// panel group, purely so PanelGeometry/NewtonianAero/Kriging/
-// LatinHypercubeSampler can be exercised end-to-end without an actual
-// OpenVSP export. This is the PLACEHOLDER vehicle used by aero_table_gen
-// until a real triangulated OML import exists -- see StlMeshLoader.h for
-// that (StlMeshLoader supports OpenVSP/OpenRocket/CAD-exported STL files;
-// PanelMesh::addPanel() takes raw triangle vertices either way, so the rest
-// of the pipeline is unaffected by the geometry source).
+// Procedurally builds a crude cylinder-plus-nose-cap body with 4 flap
+// panel groups, purely so the aero module can be exercised end-to-end
+// without a real OpenVSP export. This is the PLACEHOLDER vehicle used by
+// aero_table_gen until a real triangulated OML import exists (see StlMeshLoader.h).
 
 #include <cmath>
 
@@ -86,36 +82,60 @@ inline PanelMesh makeCylinderNoseFlapBody(int n_theta = 24, int n_axial = 10,
         }
     }
 
-    // One flap: a flat rectangular panel patch near the tail, hinged about
-    // a y-parallel axis, group_id = 1. Positioned on the -z ("bottom")
-    // side of the body, similar to a Starship aft flap.
-    PanelGroup flap_group;
-    flap_group.id = 1;
-    flap_group.name = "aft_flap";
-    flap_group.hinge_point = Eigen::Vector3d(2.0, 0.0, -radius);
-    flap_group.hinge_axis = Eigen::Vector3d::UnitY();
-    mesh.addGroup(flap_group);
+    // Four independent, deflectable flap groups (Starship-like layout): two
+    // forward flaps near the nose/cylinder junction on the "top" (+z) side,
+    // two aft flaps near the tail on the "bottom" (-z) side, each pair
+    // split left(+y)/right(-y). group_id 1=fwd_left, 2=fwd_right,
+    // 3=aft_left, 4=aft_right, matching AeroRegimeDispatch.h's fwd_sym/aft_sym/aft_diff naming.
+    struct FlapSpec {
+        int id;
+        const char* name;
+        double hinge_x, hinge_z;
+        double y_center, y_half_span;
+        double chord_sign;  // +1: patch extends toward +x (nose-ward); -1: toward -x (tail-ward)
+    };
 
     const double flap_chord = 6.0;
-    const double flap_span_half = 5.0;
-    const int n_flap = 4;
-    for (int j = 0; j < n_flap; ++j) {
-        const double y0 = -flap_span_half + 2.0 * flap_span_half * j / n_flap;
-        const double y1 = -flap_span_half + 2.0 * flap_span_half * (j + 1) / n_flap;
+    const double flap_half_span = 5.0;
+    const double y_offset = 6.0;  // left/right patch centers, so they don't overlap at y=0
+    const double fwd_hinge_x = cyl_length - 4.0;  // just aft of the nose/cylinder junction
+    const double aft_hinge_x = 2.0;               // same position as the original single aft flap
 
-        Eigen::Vector3d p00(2.0, y0, -radius);
-        Eigen::Vector3d p01(2.0, y1, -radius);
-        Eigen::Vector3d p10(2.0 - flap_chord, y0, -radius);
-        Eigen::Vector3d p11(2.0 - flap_chord, y1, -radius);
+    const FlapSpec flap_specs[4] = {
+        {1, "fwd_left",  fwd_hinge_x,  radius, +y_offset, flap_half_span, +1.0},
+        {2, "fwd_right", fwd_hinge_x,  radius, -y_offset, flap_half_span, +1.0},
+        {3, "aft_left",  aft_hinge_x, -radius, +y_offset, flap_half_span, -1.0},
+        {4, "aft_right", aft_hinge_x, -radius, -y_offset, flap_half_span, -1.0},
+    };
 
-        Panel t1{p00, p10, p11};
-        t1.group_id = 1;
-        t1.recompute();
-        Panel t2{p00, p11, p01};
-        t2.group_id = 1;
-        t2.recompute();
-        mesh.addPanel(t1);
-        mesh.addPanel(t2);
+    for (const FlapSpec& spec : flap_specs) {
+        PanelGroup flap_group;
+        flap_group.id = spec.id;
+        flap_group.name = spec.name;
+        flap_group.hinge_point = Eigen::Vector3d(spec.hinge_x, spec.y_center, spec.hinge_z);
+        flap_group.hinge_axis = Eigen::Vector3d::UnitY();
+        mesh.addGroup(flap_group);
+
+        const int n_flap = 4;
+        for (int j = 0; j < n_flap; ++j) {
+            const double y0 = spec.y_center - spec.y_half_span + 2.0 * spec.y_half_span * j / n_flap;
+            const double y1 = spec.y_center - spec.y_half_span + 2.0 * spec.y_half_span * (j + 1) / n_flap;
+            const double x_far = spec.hinge_x + spec.chord_sign * flap_chord;
+
+            Eigen::Vector3d p00(spec.hinge_x, y0, spec.hinge_z);
+            Eigen::Vector3d p01(spec.hinge_x, y1, spec.hinge_z);
+            Eigen::Vector3d p10(x_far, y0, spec.hinge_z);
+            Eigen::Vector3d p11(x_far, y1, spec.hinge_z);
+
+            Panel t1{p00, p10, p11};
+            t1.group_id = spec.id;
+            t1.recompute();
+            Panel t2{p00, p11, p01};
+            t2.group_id = spec.id;
+            t2.recompute();
+            mesh.addPanel(t1);
+            mesh.addPanel(t2);
+        }
     }
 
     return mesh;

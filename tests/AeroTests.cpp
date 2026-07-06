@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include "PanelGeometry.h"
 #include "NewtonianAero.h"
+#include "ShockExpansionAero.h"
+#include "AeroRegimeDispatch.h"
 #include "TestBodyGenerator.h"
 #include "StlMeshLoader.h"
 #include "AeroCoefficientTable.h"
@@ -10,6 +12,8 @@
 #include <cmath>
 #include <fstream>
 #include <cstdio>
+#include <string>
+#include <utility>
 
 using namespace aero_model;
 
@@ -66,12 +70,186 @@ TEST(NewtonianAeroModelTest, SymmetricBodyAtZeroAlphaZeroBetaZeroFlapGivesNearZe
     Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
     double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
 
-    AeroCoefficients c = model.evaluate(mesh, {{1, 0.0}}, 0.0, 0.0, 5.0, moment_ref, S_ref, L_ref);
-    // At alpha=beta=0, the flow is tangential to both the axisymmetric
-    // body-of-revolution panels and the flat (z=const) flap panels, so
-    // every panel's sin(theta) is exactly 0 -- CL should be ~exactly zero,
-    // not just approximately.
+    AeroCoefficients c = model.evaluate(mesh, mapFlapAxesToGroupDeflections(0.0, 0.0, 0.0),
+                                          0.0, 0.0, 5.0, moment_ref, S_ref, L_ref);
+    // At alpha=beta=0 every panel (body + all 4 flat flap patches) is
+    // exactly tangential to the flow, so CL should be ~exactly zero.
     EXPECT_NEAR(c.CL, 0.0, 1e-6);
+}
+
+// ---------------------------------------------------------------------
+// 4-flap-group geometry + flap-axis mapping
+// ---------------------------------------------------------------------
+
+TEST(TestBodyGeneratorTest, FourFlapGroupsExistWithExpectedIdsNamesAndHingeAxes) {
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    const auto& groups = mesh.groups();
+    ASSERT_EQ(groups.size(), 4u);
+
+    const std::pair<int, std::string> expected[] = {
+        {1, "fwd_left"}, {2, "fwd_right"}, {3, "aft_left"}, {4, "aft_right"}};
+    for (const auto& [id, name] : expected) {
+        auto it = groups.find(id);
+        ASSERT_NE(it, groups.end()) << "missing group id " << id;
+        EXPECT_EQ(it->second.name, name);
+        EXPECT_TRUE(it->second.hinge_axis.isApprox(Eigen::Vector3d::UnitY(), 1e-12));
+    }
+}
+
+TEST(AeroRegimeDispatchTest, FlapAxisMappingProducesExpectedSignConvention) {
+    auto fwd_only = mapFlapAxesToGroupDeflections(0.2, 0.0, 0.0);
+    EXPECT_NEAR(fwd_only[1], 0.2, 1e-12);
+    EXPECT_NEAR(fwd_only[2], 0.2, 1e-12);
+    EXPECT_NEAR(fwd_only[3], 0.0, 1e-12);
+    EXPECT_NEAR(fwd_only[4], 0.0, 1e-12);
+
+    auto diff_only = mapFlapAxesToGroupDeflections(0.0, 0.0, 0.1);
+    EXPECT_NEAR(diff_only[3] - diff_only[4], 0.1, 1e-12);
+    EXPECT_NEAR(diff_only[3] + diff_only[4], 0.0, 1e-12);
+}
+
+TEST(AeroRegimeDispatchTest, AftDifferentialFlapProducesNonzeroRollInExpectedDirection) {
+    // Rather than hand-derive the expected roll sign (easy to get backwards),
+    // this test numerically pins it down; future changes must keep it passing.
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    NewtonianAeroModel model;
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+
+    auto flap_defl = mapFlapAxesToGroupDeflections(0.0, 0.0, /*aft_diff_rad=*/0.1);
+    AeroCoefficients c = model.evaluate(mesh, flap_defl, /*alpha_rad=*/0.1, 0.0, 5.0,
+                                          moment_ref, S_ref, L_ref);
+    EXPECT_NE(c.Cl_roll, 0.0);
+
+    // Reversing aft_diff_rad must reverse Cl_roll's sign (odd symmetry) --
+    // robust regardless of which absolute sign convention was chosen.
+    auto flap_defl_neg = mapFlapAxesToGroupDeflections(0.0, 0.0, -0.1);
+    AeroCoefficients c_neg = model.evaluate(mesh, flap_defl_neg, 0.1, 0.0, 5.0,
+                                              moment_ref, S_ref, L_ref);
+    EXPECT_NEAR(c.Cl_roll, -c_neg.Cl_roll, 1e-9);
+}
+
+// ---------------------------------------------------------------------
+// ShockExpansionAeroModel (tangent-wedge + Prandtl-Meyer)
+// ---------------------------------------------------------------------
+
+TEST(ShockExpansionAeroTest, PrandtlMeyerNuIsZeroAtMachOne) {
+    EXPECT_NEAR(prandtlMeyerNu(1.0, 1.4), 0.0, 1e-9);
+}
+
+TEST(ShockExpansionAeroTest, PrandtlMeyerNuMatchesKnownGasDynamicsTableValue) {
+    // Classical Prandtl-Meyer table value (e.g. NACA 1135 / Anderson
+    // appendix), gamma=1.4: nu(2.0) ~= 26.38 deg.
+    double nu_deg = prandtlMeyerNu(2.0, 1.4) * 180.0 / kPi;
+    EXPECT_NEAR(nu_deg, 26.38, 0.05);
+}
+
+TEST(ShockExpansionAeroTest, InvertPrandtlMeyerRoundTrips) {
+    for (double M : {1.2, 1.5, 2.0, 3.0, 5.0, 8.0}) {
+        double nu = prandtlMeyerNu(M, 1.4);
+        double M_back = invertPrandtlMeyer(nu, 1.4);
+        EXPECT_NEAR(M_back, M, 1e-5) << "at M=" << M;
+    }
+}
+
+TEST(ShockExpansionAeroTest, ObliqueShockBetaMatchesKnownGasDynamicsTableValue) {
+    // Classical theta-beta-Mach chart value: M1=2.0, theta=10deg -> weak
+    // shock beta ~= 39.3 deg (Anderson / NACA 1135).
+    auto beta = solveWeakObliqueShockBeta(2.0, 10.0 * kPi / 180.0, 1.4);
+    ASSERT_TRUE(beta.has_value());
+    EXPECT_NEAR(*beta * 180.0 / kPi, 39.3, 0.3);
+}
+
+TEST(ShockExpansionAeroTest, ObliqueShockDetachesAndReturnsNulloptBeyondMaxDeflection) {
+    // M1=1.5's maximum attached-shock deflection is ~12.1deg (theta-beta-M
+    // chart) -- 30deg is well beyond detachment.
+    auto beta = solveWeakObliqueShockBeta(1.5, 30.0 * kPi / 180.0, 1.4);
+    EXPECT_FALSE(beta.has_value());
+}
+
+TEST(ShockExpansionAeroTest, SmallAngleObliqueShockCpMatchesLinearizedSupersonicTheory) {
+    // For small theta, oblique-shock Cp should roughly agree with linearized
+    // (Ackeret) theory: Cp ~= 2*theta/sqrt(M^2-1). 10% tolerance covers
+    // linearized theory's own first-order error at theta=2deg.
+    const double mach = 3.0;
+    const double theta = 2.0 * kPi / 180.0;
+    auto beta = solveWeakObliqueShockBeta(mach, theta, 1.4);
+    ASSERT_TRUE(beta.has_value());
+    const double Mn1 = mach * std::sin(*beta);
+    const double Cp_exact = (4.0 / (1.4 + 1.0)) * (Mn1 * Mn1 - 1.0) / (mach * mach);
+    const double Cp_linearized = 2.0 * theta / std::sqrt(mach * mach - 1.0);
+    EXPECT_NEAR(Cp_exact, Cp_linearized, 0.10 * Cp_linearized);
+}
+
+TEST(ShockExpansionAeroTest, SymmetricBodyAtZeroAlphaZeroBetaZeroFlapGivesNearZeroCLAtSupersonicMach) {
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    ShockExpansionAeroModel model;
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+
+    AeroCoefficients c = model.evaluate(mesh, mapFlapAxesToGroupDeflections(0.0, 0.0, 0.0),
+                                          0.0, 0.0, /*mach=*/3.0, moment_ref, S_ref, L_ref);
+    EXPECT_NEAR(c.CL, 0.0, 1e-6);
+}
+
+// ---------------------------------------------------------------------
+// Mach-regime dispatch + transonic/subsonic placeholders
+// ---------------------------------------------------------------------
+
+TEST(AeroRegimeDispatchTest, RegimeDispatchPicksExpectedRegimeAtBoundaries) {
+    EXPECT_EQ(classifyMachRegime(0.79), MachRegime::kSubsonic);
+    EXPECT_EQ(classifyMachRegime(0.8), MachRegime::kTransonic);
+    EXPECT_EQ(classifyMachRegime(1.19), MachRegime::kTransonic);
+    EXPECT_EQ(classifyMachRegime(1.2), MachRegime::kSupersonic);
+    EXPECT_EQ(classifyMachRegime(4.99), MachRegime::kSupersonic);
+    EXPECT_EQ(classifyMachRegime(5.0), MachRegime::kHypersonic);
+}
+
+TEST(AeroRegimeDispatchTest, SubsonicPlaceholderZeroAlphaGivesHoernerBaselineCD) {
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+    AeroCoefficients c = subsonicPlaceholderAero(0.0, 0.0, /*body_radius=*/4.5, /*body_length=*/40.0, S_ref, L_ref);
+    EXPECT_NEAR(c.CD, 0.8, 1e-9);
+    EXPECT_NEAR(c.Cl_roll, 0.0, 1e-12);
+    EXPECT_NEAR(c.Cm, 0.0, 1e-12);
+    EXPECT_NEAR(c.Cn_yaw, 0.0, 1e-12);
+}
+
+TEST(AeroRegimeDispatchTest, SubsonicPlaceholderCrossflowNormalForceGrowsWithAlpha) {
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+    double prev_CN = -1.0;
+    for (double alpha_deg : {10.0, 30.0, 60.0, 89.0}) {
+        AeroCoefficients c = subsonicPlaceholderAero(alpha_deg * kPi / 180.0, 0.0, 4.5, 40.0, S_ref, L_ref);
+        EXPECT_GT(c.CN, prev_CN);
+        prev_CN = c.CN;
+    }
+}
+
+TEST(AeroRegimeDispatchTest, TransonicPlaceholderMatchesSubsonicAtLowerBoundary) {
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    auto flap_defl = mapFlapAxesToGroupDeflections(0.0, 0.0, 0.0);
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+
+    AeroCoefficients transonic = transonicPlaceholderAero(mesh, flap_defl, 0.3, 0.0, kMachSubsonicUpper,
+                                                            moment_ref, S_ref, L_ref, 4.5, 40.0);
+    AeroCoefficients subsonic = subsonicPlaceholderAero(0.3, 0.0, 4.5, 40.0, S_ref, L_ref);
+    EXPECT_NEAR(transonic.CL, subsonic.CL, 1e-9);
+    EXPECT_NEAR(transonic.CD, subsonic.CD, 1e-9);
+}
+
+TEST(AeroRegimeDispatchTest, TransonicPlaceholderMatchesSupersonicAtUpperBoundary) {
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    auto flap_defl = mapFlapAxesToGroupDeflections(0.0, 0.0, 0.0);
+    Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+
+    AeroCoefficients transonic = transonicPlaceholderAero(mesh, flap_defl, 0.3, 0.0, kMachTransonicUpper,
+                                                            moment_ref, S_ref, L_ref, 4.5, 40.0);
+    ShockExpansionAeroModel wedge;
+    AeroCoefficients supersonic = wedge.evaluate(mesh, flap_defl, 0.3, 0.0, kMachTransonicUpper,
+                                                   moment_ref, S_ref, L_ref);
+    EXPECT_NEAR(transonic.CL, supersonic.CL, 1e-9);
+    EXPECT_NEAR(transonic.CD, supersonic.CD, 1e-9);
 }
 
 TEST(AeroAnglesTest, KnownCaseIdentityQuaternionPureSideslip) {
@@ -156,13 +334,18 @@ TEST(StlMeshLoaderTest, MalformedStlThrows) {
     std::remove(path.c_str());
 }
 
+// Fixture (tests/fixtures/aero_table_test.csv): 2^6=64-row complete grid
+// with simple linear per-axis formulas (CL=0.01*alpha_deg, CD=0.3,
+// Cl_roll=0.001*beta_deg+0.002*aft_diff_deg, Cm=-0.02*alpha_deg,
+// Cn_yaw=0.001*beta_deg) chosen so expected values are trivially hand-verifiable.
+
 TEST(AeroCoefficientTableTest, ExactMatchAtGridNodes) {
     AeroCoefficientTable table;
     ASSERT_TRUE(table.load(TestAeroTablePath()));
-    AeroCoefficients c = table.interpolate(5.0, -10.0, -5.0, -5.0);
+    AeroCoefficients c = table.interpolate(5.0, -10.0, -5.0, -5.0, -5.0, -5.0);
     EXPECT_NEAR(c.CL, -0.1, 1e-9);
     EXPECT_NEAR(c.CD, 0.3, 1e-9);
-    EXPECT_NEAR(c.Cl_roll, -0.005, 1e-9);
+    EXPECT_NEAR(c.Cl_roll, -0.015, 1e-9);  // 0.001*(-5) + 0.002*(-5)
     EXPECT_NEAR(c.Cm, 0.2, 1e-9);
     EXPECT_NEAR(c.Cn_yaw, -0.005, 1e-9);
 }
@@ -171,7 +354,7 @@ TEST(AeroCoefficientTableTest, SaneInterpolationBetweenNodes) {
     AeroCoefficientTable table;
     ASSERT_TRUE(table.load(TestAeroTablePath()));
     // Midpoint of every axis; fixture is designed so this lands exactly at 0.
-    AeroCoefficients c = table.interpolate(7.5, 0.0, 0.0, 0.0);
+    AeroCoefficients c = table.interpolate(7.5, 0.0, 0.0, 0.0, 0.0, 0.0);
     EXPECT_NEAR(c.CL, 0.0, 1e-9);
     EXPECT_NEAR(c.Cl_roll, 0.0, 1e-9);
     EXPECT_NEAR(c.Cm, 0.0, 1e-9);
@@ -181,9 +364,20 @@ TEST(AeroCoefficientTableTest, SaneInterpolationBetweenNodes) {
 TEST(AeroCoefficientTableTest, ClampsAtGridBoundaryForOutOfRangeQuery) {
     AeroCoefficientTable table;
     ASSERT_TRUE(table.load(TestAeroTablePath()));
-    AeroCoefficients below = table.interpolate(1.0, -10.0, -5.0, -5.0); // mach below grid min (5)
-    AeroCoefficients at_min = table.interpolate(5.0, -10.0, -5.0, -5.0);
+    AeroCoefficients below = table.interpolate(1.0, -10.0, -5.0, -5.0, -5.0, -5.0);  // mach below grid min (5)
+    AeroCoefficients at_min = table.interpolate(5.0, -10.0, -5.0, -5.0, -5.0, -5.0);
     EXPECT_NEAR(below.CL, at_min.CL, 1e-9);
+}
+
+TEST(AeroCoefficientTableTest, InterpolatesAcrossAllSixAxesIndependently) {
+    AeroCoefficientTable table;
+    ASSERT_TRUE(table.load(TestAeroTablePath()));
+    // Varying aft_diff_deg alone (holding beta_deg=0) should change Cl_roll
+    // via the 0.002*aft_diff_deg term -- exercises the newly-generalized
+    // 6-axis interpolation path (the old 4-axis table had no such axis).
+    AeroCoefficients lo = table.interpolate(7.5, 0.0, 0.0, 0.0, 0.0, -5.0);
+    AeroCoefficients hi = table.interpolate(7.5, 0.0, 0.0, 0.0, 0.0, 5.0);
+    EXPECT_NEAR(hi.Cl_roll - lo.Cl_roll, 0.02, 1e-9);  // 0.002*(5-(-5))
 }
 
 TEST(LatinHypercubeSamplerTest, SampleProducesCorrectShapeAndUnitBounds) {
