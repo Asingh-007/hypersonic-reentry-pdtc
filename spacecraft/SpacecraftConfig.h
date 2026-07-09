@@ -25,6 +25,15 @@ struct SpacecraftConfig {
     double L_ref = 0.0;                       // reference length, m
     Eigen::Vector3d moment_ref = Eigen::Vector3d::Zero(); // moment reference point, body frame (approx CG)
 
+    // PLACEHOLDER: nose radius for stagnation-point heating (Sutton-Graves), m.
+    // This vehicle is a pointed/rounded nose-cone shape (Starship-like), NOT a
+    // blunt Apollo-style capsule, so nose_radius_m is deliberately much smaller
+    // than body_radius (aero/data/reference_quantities.csv: body_radius =
+    // 4.63296 m) -- picked as ~0.18x body_radius, NOT auto-fit from STL geometry
+    // (no nose-tip-curvature extraction exists yet -- see aero/StlMeshLoader.h).
+    // TODO: replace with actual vehicle nose-cap radius once available.
+    double nose_radius_m = 0.0;
+
     // Precomputed (mach, alpha_deg, beta_deg, fwd_sym_deg, aft_sym_deg,
     // aft_diff_deg) -> AeroCoefficients lookup table, generated offline by
     // aero/GenerateAeroTable.cpp. DescentDynamics only ever queries this table.
@@ -37,8 +46,10 @@ struct SpacecraftConfig {
     // silently construct into a broken-but-alive state.
     SpacecraftConfig(float mass, const Eigen::Matrix3d& inertia,
                       double S_ref, double L_ref, const Eigen::Vector3d& moment_ref,
+                      double nose_radius_m,
                       const std::string& aero_table_csv_path)
-        : mass(mass), inertia(inertia), S_ref(S_ref), L_ref(L_ref), moment_ref(moment_ref) {
+        : mass(mass), inertia(inertia), S_ref(S_ref), L_ref(L_ref), moment_ref(moment_ref),
+          nose_radius_m(nose_radius_m) {
         if (!aero_table.load(aero_table_csv_path)) {
             throw std::runtime_error("SpacecraftConfig: failed to load aero table from " + aero_table_csv_path);
         }

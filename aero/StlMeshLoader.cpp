@@ -1,6 +1,7 @@
 #include "StlMeshLoader.h"
 
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -136,6 +137,31 @@ PanelMesh LoadMeshFromStl(const std::string& path, int group_id) {
     }
 
     return mesh;
+}
+
+void AppendMeshToStlStream(std::ofstream& out, const std::vector<Panel>& panels,
+                            const std::string& solid_name) {
+    out << std::setprecision(9);
+    out << "solid " << solid_name << "\n";
+    for (const Panel& p : panels) {
+        out << "  facet normal " << p.normal.x() << " " << p.normal.y() << " " << p.normal.z() << "\n";
+        out << "    outer loop\n";
+        for (const Eigen::Vector3d& v : {p.v0, p.v1, p.v2}) {
+            out << "      vertex " << v.x() << " " << v.y() << " " << v.z() << "\n";
+        }
+        out << "    endloop\n";
+        out << "  endfacet\n";
+    }
+    out << "endsolid " << solid_name << "\n";
+}
+
+void WriteMeshToStl(const std::string& path, const std::vector<Panel>& panels,
+                     const std::string& solid_name) {
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        throw std::runtime_error("WriteMeshToStl: could not open " + path + " for writing");
+    }
+    AppendMeshToStlStream(out, panels, solid_name);
 }
 
 }  // namespace aero_model

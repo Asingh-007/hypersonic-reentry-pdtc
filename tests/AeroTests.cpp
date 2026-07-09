@@ -6,10 +6,12 @@
 #include "TestBodyGenerator.h"
 #include "StlMeshLoader.h"
 #include "SpacecraftGeometry.h"
+#include "FlapHingeData.h"
 #include "AeroCoefficientTable.h"
 #include "AeroAngles.h"
 #include "LatinHypercubeSampler.h"
 #include "Kriging.h"
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <cstdio>
@@ -361,6 +363,64 @@ TEST(StlMeshLoaderTest, MalformedStlThrows) {
     std::remove(path.c_str());
 }
 
+TEST(StlMeshLoaderTest, WriteMeshToStlRoundTripsThroughLoadMeshFromStl) {
+    Panel p{Eigen::Vector3d(0, 0, 0), Eigen::Vector3d(2, 0, 0), Eigen::Vector3d(0, 3, 0)};
+    p.recompute();
+    std::string path = std::string(TESTS_SOURCE_DIR) + "/tests/fixtures/_tmp_write_test.stl";
+
+    WriteMeshToStl(path, {p}, "round_trip_test");
+    PanelMesh reloaded = LoadMeshFromStl(path, /*group_id=*/0);
+    std::remove(path.c_str());
+
+    ASSERT_EQ(reloaded.panels().size(), 1u);
+    EXPECT_TRUE(reloaded.panels()[0].v0.isApprox(p.v0, 1e-6));
+    EXPECT_TRUE(reloaded.panels()[0].v1.isApprox(p.v1, 1e-6));
+    EXPECT_TRUE(reloaded.panels()[0].v2.isApprox(p.v2, 1e-6));
+    EXPECT_NEAR(reloaded.panels()[0].area, p.area, 1e-6);
+}
+
+// ---------------------------------------------------------------------
+// FlapHingeData (shared source of truth for real-vehicle flap geometry)
+// ---------------------------------------------------------------------
+
+TEST(FlapHingeDataTest, TableHasFourUniqueIdsMatchingFwdAftConvention) {
+    const auto& table = FlapHingeTable();
+    ASSERT_EQ(table.size(), 4u);
+    std::vector<int> ids;
+    for (const auto& f : table) ids.push_back(f.group_id);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<int>{1, 2, 3, 4}));
+}
+
+TEST(FlapHingeDataTest, DeflectingAFlapAboutItsHingeInCadFramePreservesRadiusFromHinge) {
+    // Sanity check for GenerateDeflectedGeometry.cpp's use of FlapHingeData
+    // directly in the CAD frame (not the model frame SpacecraftGeometry.cpp
+    // uses) -- deflecting about (hinge_point_cad_mm, UnitY) should rotate
+    // vertices rigidly, preserving their distance from the hinge line.
+    const FlapHingeInfo& f = FlapHingeTable()[2];  // aft_top
+    const std::string geometry_dir = std::string(TESTS_SOURCE_DIR) + "/geometry";
+    PanelMesh mesh = LoadMeshFromStl(geometry_dir + "/" + f.stl_filename, f.group_id);
+
+    PanelGroup g;
+    g.id = f.group_id;
+    g.hinge_point = f.hinge_point_cad_mm;
+    g.hinge_axis = Eigen::Vector3d::UnitY();
+    mesh.addGroup(g);
+
+    const double deflection_rad = -9.77187 * kPi / 180.0;
+    auto deflected = mesh.deflected({{f.group_id, deflection_rad}});
+    ASSERT_EQ(deflected.size(), mesh.panels().size());
+
+    const Eigen::Vector3d& v0_before = mesh.panels()[0].v0;
+    const Eigen::Vector3d& v0_after = deflected[0].v0;
+    auto radiusFromHinge = [&](const Eigen::Vector3d& v) {
+        const Eigen::Vector3d r = v - f.hinge_point_cad_mm;
+        return std::sqrt(r.x() * r.x() + r.z() * r.z());  // perpendicular to UnitY hinge axis
+    };
+    EXPECT_NEAR(radiusFromHinge(v0_before), radiusFromHinge(v0_after), 1e-6);
+    EXPECT_NEAR(v0_before.y(), v0_after.y(), 1e-9);  // hinge axis is Y -- unaffected
+}
+
 // Fixture (tests/fixtures/aero_table_test.csv): 2^6=64-row complete grid
 // with simple linear per-axis formulas (CL=0.01*alpha_deg, CD=0.3,
 // Cl_roll=0.001*beta_deg+0.002*aft_diff_deg, Cm=-0.02*alpha_deg,
@@ -442,10 +502,6 @@ TEST(LatinHypercubeSamplerTest, AugmentWithFixedPointsAppendsCorrectly) {
     EXPECT_NEAR(out(2, 0), 9.0, 1e-9);
     EXPECT_NEAR(out(2, 1), 9.0, 1e-9);
 }
-
-// ---------------------------------------------------------------------
-// Kriging
-// ---------------------------------------------------------------------
 
 TEST(UniversalKrigingTest, FitsAndPredictsAKnownSyntheticFunctionReasonablyWell) {
     // f(x) = x^2, zero trend function (so the GP has to explain everything).

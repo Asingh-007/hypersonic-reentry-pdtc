@@ -28,12 +28,15 @@ file(GLOB_RECURSE SOURCE
   "${CMAKE_CURRENT_SOURCE_DIR}/atmosphere/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/atmosphere/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/attitude/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/attitude/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/aero/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/aero/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/loads/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/loads/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
 )
-# GenerateAeroTable.cpp has its own main() (offline table-generator tool,
-# built as the separate aero_table_gen target below) -- exclude it from the
-# main glob or main/aero_table_gen would both define main() when linked together.
+# GenerateAeroTable.cpp and GenerateDeflectedGeometry.cpp each have their own
+# main() (offline tools, built as separate targets below) -- exclude them
+# from the main glob or multiple targets' main()s would collide when linked
+# together.
 list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/aero/GenerateAeroTable.cpp")
+list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/aero/GenerateDeflectedGeometry.cpp")
 
 add_executable(main ${SOURCE})
 target_include_directories(main PRIVATE
@@ -44,6 +47,7 @@ target_include_directories(main PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/atmosphere
   ${CMAKE_CURRENT_SOURCE_DIR}/attitude
   ${CMAKE_CURRENT_SOURCE_DIR}/aero
+  ${CMAKE_CURRENT_SOURCE_DIR}/loads
 )
 target_link_libraries (main Eigen3::Eigen Matplot++::matplot libclarabel_c_shared)
 
@@ -71,10 +75,30 @@ target_link_libraries(aero_table_gen PRIVATE Eigen3::Eigen)
 # explicitly here for <filesystem> and nested namespace syntax.
 target_compile_features(aero_table_gen PRIVATE cxx_std_17)
 
+# Offline deflected-geometry generator -- reads aero/data/doe_points.csv
+# (written by aero_table_gen) and rotates each flap's neutral STL about its
+# hinge for each DOE point, for handoff to a CFD mesher. Run after
+# aero_table_gen has produced doe_points.csv.
+add_executable(deflected_geometry_gen
+  aero/GenerateDeflectedGeometry.cpp
+  aero/PanelGeometry.cpp
+  aero/StlMeshLoader.cpp
+  aero/NewtonianAero.cpp
+  aero/ShockExpansionAero.cpp
+  aero/AeroRegimeDispatch.cpp
+)
+target_include_directories(deflected_geometry_gen PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/aero
+)
+target_link_libraries(deflected_geometry_gen PRIVATE Eigen3::Eigen)
+target_compile_features(deflected_geometry_gen PRIVATE cxx_std_17)
+
 add_executable(unit_tests
   tests/AtmosphereModelTests.cpp
   tests/DynamicsTests.cpp
   tests/AeroTests.cpp
+  tests/HeatingLoadModelTests.cpp
   atmosphere/AtmosphereModel.cpp
   dynamics/DescentDynamics.cpp
   attitude/QuaternionUtils.cpp
@@ -89,6 +113,7 @@ add_executable(unit_tests
   aero/SpacecraftGeometry.cpp
   aero/AeroAngles.cpp
   aero/AeroCoefficientTable.cpp
+  loads/HeatingLoadModel.cpp
 )
 target_include_directories(unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -98,6 +123,7 @@ target_include_directories(unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/atmosphere
   ${CMAKE_CURRENT_SOURCE_DIR}/attitude
   ${CMAKE_CURRENT_SOURCE_DIR}/aero
+  ${CMAKE_CURRENT_SOURCE_DIR}/loads
 )
 target_link_libraries(unit_tests PRIVATE Eigen3::Eigen GTest::gtest GTest::gtest_main)
 target_compile_definitions(unit_tests PRIVATE TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

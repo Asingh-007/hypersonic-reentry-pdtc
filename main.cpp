@@ -9,6 +9,8 @@
 #include "SpacecraftConfig.h"
 #include "PlanetConfig.h"
 #include "ControlInputs.h"
+#include "HeatingLoadModel.h"
+#include "GuidanceConstraints.h"
 #include <matplot/matplot.h>
 
 // MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
@@ -45,15 +47,18 @@ int main() {
     double S_ref = kPi * 4.5 * 4.5;
     double L_ref = 9.0;
     Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
+    double nose_radius_m = 0.85; // PLACEHOLDER: ~0.18x real body_radius=4.633m
+                                  // (aero/data/reference_quantities.csv) -- see
+                                  // SpacecraftConfig.h nose_radius_m comment.
     std::string aero_table_path = (source_dir / "aero" / "data" / "aero_table.csv").generic_string();
-    SpacecraftConfig spacecraft_config(1000.0f, inertia, S_ref, L_ref, moment_ref, aero_table_path);
+    SpacecraftConfig spacecraft_config(1000.0f, inertia, S_ref, L_ref, moment_ref, nose_radius_m, aero_table_path);
     DescentDynamics descent_dynamics(earth_config, spacecraft_config);
     ThrustVectorControlInputs control_inputs(0.0f, 0.1f, 0.1f);
 
     // Set initial entry state for the descent simulation
     constexpr float kEntryInterfaceAltitude = 120000.0f; // m
     DescentState initial_state(
-        earth_config.radius + kEntryInterfaceAltitude, 0.0f, 0.0f, 7500.0f, -0.1f, 0.0f, // translational
+        earth_config.radius + kEntryInterfaceAltitude, 0.0f, 0.0f, 7800.0f, -0.1f, 0.0f, // translational
         0.0f, 0.0f, 0.0f, 1.0f,                        // q1,q2,q3,q4 identity
         0.01f, 0.01f, 0.0f                              // wx,wy,wz small placeholder rates
     );
@@ -68,6 +73,23 @@ int main() {
 
     std::cout << "Integration complete: " << history.t.size() << " recorded points." << std::endl;
     std::cout << "Final: r = " << history.r.back() << ", v = " << history.v.back() << std::endl;
+
+    GuidanceConstraints constraints;
+    ConstraintViolationReport violation_report = checkConstraints(history, constraints);
+    if (violation_report.hasViolations()) {
+        std::cout << "Constraint check: " << violation_report.violations.size()
+                  << " violation(s) found:" << std::endl;
+        for (const auto& v : violation_report.violations) {
+            std::cout << "  [" << v.constraint_name << "] at t=" << v.time_s
+                      << "s (index " << v.index << "): value=" << v.value
+                      << ", limit=" << v.limit << ", margin=" << v.margin << std::endl;
+        }
+    } else {
+        std::cout << "Constraint check: no violations (within max_heat_flux="
+                  << constraints.max_heat_flux_w_m2 << " W/m^2, max_qbar="
+                  << constraints.max_qbar_pa << " Pa, max_load_factor="
+                  << constraints.max_load_factor_g << " g)." << std::endl;
+    }
 
     constexpr double kRadToDeg = 180.0 / kPi;
     const size_t n = history.t.size();
@@ -152,9 +174,33 @@ int main() {
     matplot::title("Quaternion Norm vs Time (drift check)");
     matplot::save((output_dir / "quaternion_norm_vs_time.png").generic_string());
 
-    // 8. Heating rate vs time -- TODO: no heating model (e.g. Sutton-Graves)
-    // exists in this codebase yet. Add once a stagnation-point heating
-    // correlation is implemented.
+    // 8. Heat flux vs time (convective, radiative, total -- one figure with legend)
+    auto fig8 = matplot::figure(true);
+    matplot::hold(true);
+    matplot::plot(history.t, history.heat_flux_conv)->line_width(2);
+    matplot::plot(history.t, history.heat_flux_rad)->line_width(2);
+    matplot::plot(history.t, history.heat_flux_total)->line_width(2);
+    matplot::legend(std::vector<std::string>{"convective (Sutton-Graves)", "radiative (Tauber-Sutton)", "total"});
+    matplot::xlabel("Time (s)");
+    matplot::ylabel("Stagnation-Point Heat Flux (W/m^2)");
+    matplot::title("Heat Flux vs Time");
+    matplot::save((output_dir / "heat_flux_vs_time.png").generic_string());
+
+    // 9. Cumulative heat load vs time
+    auto fig9 = matplot::figure(true);
+    matplot::plot(history.t, history.heat_load);
+    matplot::xlabel("Time (s)");
+    matplot::ylabel("Cumulative Heat Load (J/m^2)");
+    matplot::title("Cumulative Heat Load vs Time");
+    matplot::save((output_dir / "heat_load_vs_time.png").generic_string());
+
+    // 10. Load factor vs time
+    auto fig10 = matplot::figure(true);
+    matplot::plot(history.t, history.load_factor);
+    matplot::xlabel("Time (s)");
+    matplot::ylabel("Load Factor (g)");
+    matplot::title("Load Factor vs Time");
+    matplot::save((output_dir / "load_factor_vs_time.png").generic_string());
 
     } catch (const std::exception& e) {
         // Matplot++ Error Handling: if gnuplot isn't installed or isn't on PATH, matplot++ will throw an exception.

@@ -51,6 +51,11 @@ class DescentDynamics {
             std::vector<double> q1, q2, q3, q4;
             std::vector<double> wx, wy, wz;
             std::vector<double> qbar; // dynamic pressure, derived, for plotting
+            std::vector<double> heat_flux_conv;  // Sutton-Graves stagnation-point convective heat flux, W/m^2
+            std::vector<double> heat_flux_rad;   // Tauber-Sutton stagnation-point radiative heat flux, W/m^2
+            std::vector<double> heat_flux_total; // heat_flux_conv + heat_flux_rad, W/m^2
+            std::vector<double> heat_load;   // cumulative trapezoidal integral of heat_flux_total, J/m^2
+            std::vector<double> load_factor; // total non-gravitational specific force / g_0 (dimensionless, g's)
         };
 
         DescentDynamics(const PlanetConfig& planet_config, const SpacecraftConfig& spacecraft_config)
@@ -68,16 +73,11 @@ class DescentDynamics {
                                      double initial_dt,
                                      double tol) const;
 
-    private:
-        PlanetConfig planet_config_;
-        SpacecraftConfig spacecraft_config_;
-
-        static StateVector toVector(const DescentState& s);
-        static DescentState fromVector(const StateVector& v);
-
         // Density at radial distance r, delegating to the atmosphere model
-        // selected by planet_config_.body (Earth US76 or Mars exponential).
-        double atmosphereDensity(double r) const;
+        // selected by planet_config.body (Earth US76 or Mars exponential).
+        // Public static (not an instance method) so loads/HeatingLoadModel.cpp
+        // can call it directly without duplicating this logic.
+        static double atmosphereDensity(double r, const PlanetConfig& planet_config);
 
         // Speed of sound at radial distance r, needed for the Mach number
         // fed into aero_table lookups.
@@ -93,7 +93,15 @@ class DescentDynamics {
         // exists. For Mars, MarsAtmosphereExponential::Compute() already
         // returns a temperature (constant), used directly with CO2's gas
         // constant and specific-heat ratio.
-        double speedOfSound(double r) const;
+        // Public static for the same reason as atmosphereDensity() above.
+        static double speedOfSound(double r, const PlanetConfig& planet_config);
+
+    private:
+        PlanetConfig planet_config_;
+        SpacecraftConfig spacecraft_config_;
+
+        static StateVector toVector(const DescentState& s);
+        static DescentState fromVector(const StateVector& v);
 };
 
 #endif

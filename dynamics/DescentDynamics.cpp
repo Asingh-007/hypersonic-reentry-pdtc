@@ -3,6 +3,7 @@
 #include "PlanetConfig.h"
 #include "ControlInputs.h"
 #include "AtmosphereModel.h"
+#include "HeatingLoadModel.h"
 #include <cmath>
 #include <algorithm>
 #include <iostream>
@@ -28,16 +29,16 @@ DescentState DescentDynamics::fromVector(const StateVector& v) {
         static_cast<float>(v(10)), static_cast<float>(v(11)), static_cast<float>(v(12)));
 }
 
-double DescentDynamics::atmosphereDensity(double r) const {
-    double altitude = r - planet_config_.radius;
-    if (planet_config_.body == PlanetBody::Mars) {
+double DescentDynamics::atmosphereDensity(double r, const PlanetConfig& planet_config) {
+    double altitude = r - planet_config.radius;
+    if (planet_config.body == PlanetBody::Mars) {
         return MarsAtmosphereExponential::Compute(altitude).density;
     }
     return EarthAtmosphere1976::Compute(altitude).density;
 }
 
-double DescentDynamics::speedOfSound(double r) const {
-    if (planet_config_.body == PlanetBody::Mars) {
+double DescentDynamics::speedOfSound(double r, const PlanetConfig& planet_config) {
+    if (planet_config.body == PlanetBody::Mars) {
         // MarsAtmosphereExponential's temperature is a constant, not a real
         // altitude profile (see AtmosphereModel.h).
         double T = MarsAtmosphereExponential::kRefTemperatureK;
@@ -48,7 +49,7 @@ double DescentDynamics::speedOfSound(double r) const {
     // simple two-segment standard-atmosphere temperature lapse (troposphere
     // lapse rate below 11 km, held constant above), NOT the same model
     // EarthAtmosphere1976 uses for density.
-    double altitude = r - planet_config_.radius;
+    double altitude = r - planet_config.radius;
     constexpr double T0 = 288.15, lapse_rate = 0.0065, h_tropopause = 11000.0, T_tropopause = 216.65;
     double T = (altitude < h_tropopause) ? (T0 - lapse_rate * altitude) : T_tropopause;
     constexpr double gamma_air = 1.4, R_air = 287.0528;
@@ -93,8 +94,8 @@ DescentDynamics::StateVector DescentDynamics::derivatives(const StateVector& x,
     // Newtonian-panel (to be offline-corrected once real CFD data exists)
     // lookup table -- see AeroCoefficientTable.h / aero/GenerateAeroTable.cpp.
     // Density from the real atmosphere model as before.
-    double rho = atmosphereDensity(r);
-    double a_sound = speedOfSound(r); // PLACEHOLDER -- see speedOfSound() comment
+    double rho = atmosphereDensity(r, planet_config_);
+    double a_sound = speedOfSound(r, planet_config_); // PLACEHOLDER -- see speedOfSound() comment
     double mach = v / a_sound;
 
     AeroAngles angles = ComputeAeroAngles(q, fpa, v_azi);
@@ -175,8 +176,22 @@ DescentDynamics::TrajectoryHistory DescentDynamics::integrate(
         hist.v.push_back(s.v); hist.fpa.push_back(s.fpa); hist.v_azi.push_back(s.v_azi);
         hist.q1.push_back(s.q1); hist.q2.push_back(s.q2); hist.q3.push_back(s.q3); hist.q4.push_back(s.q4);
         hist.wx.push_back(s.wx); hist.wy.push_back(s.wy); hist.wz.push_back(s.wz);
-        double rho = atmosphereDensity(s.r);
+        double rho = atmosphereDensity(s.r, planet_config_);
         hist.qbar.push_back(0.5 * rho * s.v * s.v);
+
+        HeatingLoadResult hl = computeHeatingAndLoad(xv, planet_config_, spacecraft_config_, control_inputs);
+        hist.heat_flux_conv.push_back(hl.heat_flux_conv_w_m2);
+        hist.heat_flux_rad.push_back(hl.heat_flux_rad_w_m2);
+        hist.heat_flux_total.push_back(hl.heat_flux_total_w_m2);
+        hist.load_factor.push_back(hl.load_factor_g);
+
+        if (hist.heat_load.empty()) {
+            hist.heat_load.push_back(0.0); // first recorded point: nothing to trapezoid against yet
+        } else {
+            size_t i = hist.heat_flux_total.size() - 1;
+            double dt_seg = hist.t[i] - hist.t[i - 1];
+            hist.heat_load.push_back(hist.heat_load.back() + 0.5 * (hist.heat_flux_total[i] + hist.heat_flux_total[i - 1]) * dt_seg);
+        }
     };
 
     record(t, x);

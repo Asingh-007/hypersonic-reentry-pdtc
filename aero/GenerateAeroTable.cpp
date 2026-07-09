@@ -2,10 +2,17 @@
 //
 // Offline tool: sweeps the Mach-regime-dispatched aero model (see
 // AeroRegimeDispatch.h) over a (Mach, alpha_deg, beta_deg, fwd_sym_deg,
-// aft_sym_deg, aft_diff_deg) grid, writes a CSV lookup table, and prints a
-// suggested LHS-DOE CFD anchor-point matrix for future real Fluent runs.
-// No Kriging correction is applied -- no real CFD data exists yet, so this
-// is the raw dispatched-model evaluation (see FUTURE WORK at the bottom).
+// aft_sym_deg, aft_diff_deg) grid, writes a CSV lookup table, and writes/
+// prints a suggested LHS-DOE CFD anchor-point matrix for future real
+// Fluent runs. No Kriging correction is applied -- no real CFD data exists
+// yet, so this is the raw dispatched-model evaluation (see FUTURE WORK at
+// the bottom).
+//
+// Pass --doe-only to (re)generate aero/data/doe_points.csv and
+// reference_quantities.csv (mesh load only, a few seconds) without
+// re-running the full grid sweep (tens of minutes for the real spacecraft
+// geometry) -- useful for downstream tooling like GenerateDeflectedGeometry.cpp
+// and cfd/run_doe_point.py that only need those two files.
 
 #include <filesystem>
 #include <fstream>
@@ -29,16 +36,70 @@ using namespace aero_model;
 constexpr double kPi = 3.14159265358979323846;
 
 int main(int argc, char** argv) {
-    // --- 1. Build the vehicle mesh ---
+    bool doe_only = false;
+    std::string stl_override;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--doe-only") doe_only = true;
+        else stl_override = argv[i];
+    }
+
+    const std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
+    const std::filesystem::path data_dir = source_dir / "data";
+    std::filesystem::create_directories(data_dir);
+
+    // --- 1. Suggested CFD anchor-point matrix (LHS-DOE) for future real
+    // Fluent runs -- not used to fabricate any correction here. Mach bounds
+    // span the full 0.2-12 envelope since CFD is most needed where no
+    // theory applies (transonic/subsonic); kept at 3 variables (mach,
+    // alpha_deg, aft_sym_deg -- the most operationally significant flap
+    // axis) rather than all 6, with fwd_sym_deg/aft_diff_deg left for later.
+    // Runs first (independent of the mesh/grid sweep below) so --doe-only
+    // can regenerate it cheaply. ---
+    std::vector<DesignVariable> vars = {
+        {"mach", 0.2, 12.0}, {"alpha_deg", 0.0, 70.0}, {"aft_sym_deg", -15.0, 15.0}};
+
+    LatinHypercubeSampler lhs(/*seed=*/7);
+    Eigen::MatrixXd unit_design = lhs.sample(/*n_samples=*/18, /*n_dims=*/3, /*n_swap_iters=*/8000);
+    Eigen::MatrixXd doe = LatinHypercubeSampler::scaleToBounds(unit_design, vars);
+
+    // Must-include points: belly-flop trim (M=6, alpha=60deg, aft_sym=0)
+    // and entry-interface condition (M=10, alpha=20deg, aft_sym=0) --
+    // trim-neutral aft_sym assumed for these reference anchors.
+    Eigen::MatrixXd fixed_points(2, 3);
+    fixed_points << 6.0, 60.0, 0.0,
+                    10.0, 20.0, 0.0;
+    doe = LatinHypercubeSampler::augmentWithFixedPoints(doe, fixed_points);
+
+    std::cout << "\n=== Suggested CFD anchor-point matrix (" << doe.rows() << " points) ===\n";
+    std::cout << "  idx      Mach   alpha[deg]   aft_sym[deg]\n";
+    std::cout << std::fixed << std::setprecision(4);
+    for (int i = 0; i < doe.rows(); ++i) {
+        std::cout << "  " << std::setw(3) << i << "   " << std::setw(8) << doe(i, 0)
+                   << "   " << std::setw(9) << doe(i, 1) << "   " << std::setw(12) << doe(i, 2) << "\n";
+    }
+
+    const std::filesystem::path doe_csv_path = data_dir / "doe_points.csv";
+    std::ofstream doe_out(doe_csv_path);
+    if (!doe_out.is_open()) {
+        std::cerr << "Failed to open " << doe_csv_path << " for writing." << std::endl;
+        return 1;
+    }
+    doe_out << "idx,mach,alpha_deg,aft_sym_deg\n" << std::setprecision(17);
+    for (int i = 0; i < doe.rows(); ++i) {
+        doe_out << i << "," << doe(i, 0) << "," << doe(i, 1) << "," << doe(i, 2) << "\n";
+    }
+    std::cout << "Wrote DOE points to " << doe_csv_path << std::endl;
+
+    // --- 2. Build the vehicle mesh ---
     // Default: the real SolidWorks-exported geometry under geometry/ (see
-    // SpacecraftGeometry.h). argv[1], if given, overrides with a single
-    // STL file instead (body-only, no flap groups).
+    // SpacecraftGeometry.h). A non-flag argv, if given, overrides with a
+    // single STL file instead (body-only, no flap groups).
     PanelMesh mesh;
     Eigen::Vector3d moment_ref;
     double S_ref, L_ref, body_radius, body_length;
-    if (argc > 1) {
-        std::cout << "Loading mesh from STL: " << argv[1] << std::endl;
-        mesh = LoadMeshFromStl(argv[1], /*group_id=*/0);
+    if (!stl_override.empty()) {
+        std::cout << "Loading mesh from STL: " << stl_override << std::endl;
+        mesh = LoadMeshFromStl(stl_override, /*group_id=*/0);
         std::cerr << "Note: STL import has no concept of flap hinge groups -- "
                      "call mesh.addGroup(...) manually (ids 1=fwd_left, "
                      "2=fwd_right, 3=aft_left, 4=aft_right) or flap deflection "
@@ -50,8 +111,7 @@ int main(int argc, char** argv) {
         body_radius = 4.5;
         body_length = 40.0;
     } else {
-        const std::filesystem::path geometry_dir =
-            std::filesystem::path(__FILE__).parent_path().parent_path() / "geometry";
+        const std::filesystem::path geometry_dir = source_dir.parent_path() / "geometry";
         std::cout << "Loading real spacecraft geometry from " << geometry_dir << std::endl;
         SpacecraftGeometry geo = LoadSpacecraftGeometry(geometry_dir.string());
         mesh = geo.mesh;
@@ -65,7 +125,24 @@ int main(int argc, char** argv) {
                    << std::endl;
     }
 
-    // --- 2. Define the grid envelope ---
+    // Written so downstream tooling (e.g. cfd/run_doe_point.py) reads these
+    // once-computed values instead of hardcoding a second copy that could
+    // drift out of sync. moment_ref is in this codebase's model frame
+    // (meters, +X=nose) -- see SpacecraftGeometry.h for the CAD-frame
+    // conversion needed before using it as a Fluent moment center.
+    {
+        std::ofstream ref_out((data_dir / "reference_quantities.csv").string());
+        ref_out << "S_ref,L_ref,body_radius,body_length,moment_ref_x,moment_ref_y,moment_ref_z\n"
+                << std::setprecision(17)
+                << S_ref << "," << L_ref << "," << body_radius << "," << body_length << ","
+                << moment_ref.x() << "," << moment_ref.y() << "," << moment_ref.z() << "\n";
+    }
+
+    if (doe_only) {
+        return 0;
+    }
+
+    // --- 3. Define the grid envelope ---
     // PLACEHOLDER ranges/resolution -- revisit once real mission envelopes
     // are known. mach_grid spans 0.2-12 (at least one point per regime) so
     // the subsonic/transonic placeholders are actually exercised in the
@@ -79,11 +156,7 @@ int main(int argc, char** argv) {
     const std::vector<double> aft_sym_deg_grid = {-15, -7.5, 0, 7.5, 15};
     const std::vector<double> aft_diff_deg_grid = {-15, -7.5, 0, 7.5, 15};
 
-    std::filesystem::path source_dir = std::filesystem::path(__FILE__).parent_path();
-    std::filesystem::path data_dir = source_dir / "data";
-    std::filesystem::create_directories(data_dir);
-    std::filesystem::path csv_path = data_dir / "aero_table.csv";
-
+    const std::filesystem::path csv_path = data_dir / "aero_table.csv";
     std::ofstream out(csv_path);
     if (!out.is_open()) {
         std::cerr << "Failed to open " << csv_path << " for writing." << std::endl;
@@ -124,35 +197,6 @@ int main(int argc, char** argv) {
     }
     out.close();
     std::cout << "Wrote " << row_count << " rows to " << csv_path << std::endl;
-
-    // --- 3. Suggested CFD anchor-point matrix (LHS-DOE) for future real
-    // Fluent runs -- not used to fabricate any correction here. Mach bounds
-    // span the full 0.2-12 envelope since CFD is most needed where no
-    // theory applies (transonic/subsonic); kept at 3 variables (mach,
-    // alpha_deg, aft_sym_deg -- the most operationally significant flap
-    // axis) rather than all 6, with fwd_sym_deg/aft_diff_deg left for later. ---
-    std::vector<DesignVariable> vars = {
-        {"mach", 0.2, 12.0}, {"alpha_deg", 0.0, 70.0}, {"aft_sym_deg", -15.0, 15.0}};
-
-    LatinHypercubeSampler lhs(/*seed=*/7);
-    Eigen::MatrixXd unit_design = lhs.sample(/*n_samples=*/18, /*n_dims=*/3, /*n_swap_iters=*/8000);
-    Eigen::MatrixXd doe = LatinHypercubeSampler::scaleToBounds(unit_design, vars);
-
-    // Must-include points: belly-flop trim (M=6, alpha=60deg, aft_sym=0)
-    // and entry-interface condition (M=10, alpha=20deg, aft_sym=0) --
-    // trim-neutral aft_sym assumed for these reference anchors.
-    Eigen::MatrixXd fixed_points(2, 3);
-    fixed_points << 6.0, 60.0, 0.0,
-                    10.0, 20.0, 0.0;
-    doe = LatinHypercubeSampler::augmentWithFixedPoints(doe, fixed_points);
-
-    std::cout << "\n=== Suggested CFD anchor-point matrix (" << doe.rows() << " points) ===\n";
-    std::cout << "  idx      Mach   alpha[deg]   aft_sym[deg]\n";
-    std::cout << std::fixed << std::setprecision(4);
-    for (int i = 0; i < doe.rows(); ++i) {
-        std::cout << "  " << std::setw(3) << i << "   " << std::setw(8) << doe(i, 0)
-                   << "   " << std::setw(9) << doe(i, 1) << "   " << std::setw(12) << doe(i, 2) << "\n";
-    }
 
     return 0;
 }

@@ -30,7 +30,8 @@ SpacecraftConfig MakeTestSpacecraftConfig(const Eigen::Matrix3d& inertia) {
     double S_ref = kPi * 4.5 * 4.5;
     double L_ref = 9.0;
     Eigen::Vector3d moment_ref(20.0, 0.0, 0.0);
-    return SpacecraftConfig(1000.0f, inertia, S_ref, L_ref, moment_ref, TestAeroTablePath());
+    double nose_radius_m = 0.85; // matches main.cpp placeholder value
+    return SpacecraftConfig(1000.0f, inertia, S_ref, L_ref, moment_ref, nose_radius_m, TestAeroTablePath());
 }
 
 // altitude_m defaults to 100 km (used by tests that don't care about the

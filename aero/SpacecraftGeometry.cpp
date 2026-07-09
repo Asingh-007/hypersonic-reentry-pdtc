@@ -1,5 +1,6 @@
 #include "SpacecraftGeometry.h"
 #include "StlMeshLoader.h"
+#include "FlapHingeData.h"
 
 #include <filesystem>
 #include <limits>
@@ -31,13 +32,6 @@ void AppendTransformed(const PanelMesh& mesh, PanelMesh& out) {
     }
 }
 
-struct FlapFile {
-    int id;
-    const char* name;
-    const char* filename;
-    Eigen::Vector3d hinge_cad_mm;
-};
-
 }  // namespace
 
 SpacecraftGeometry LoadSpacecraftGeometry(const std::string& geometry_dir) {
@@ -47,28 +41,19 @@ SpacecraftGeometry LoadSpacecraftGeometry(const std::string& geometry_dir) {
     SpacecraftGeometry geo;
 
     // --- Body (group 0, fixed) ---
-    const PanelMesh body_raw = LoadMeshFromStl((dir / "Spacecraft Assembly - Spacecraft Body-1.STL").string(), 0);
+    const PanelMesh body_raw = LoadMeshFromStl((dir / kSpacecraftBodyStlFilename).string(), 0);
     AppendTransformed(body_raw, geo.mesh);
 
-    // --- 4 flaps. Hinge points below are the measured centroids of each
-    // flap's mounting edge (a tight, near-planar cluster of vertices found
-    // by inspecting the raw STL data); hinge_axis is the body's nose-tail
-    // direction for all 4, since each flap's span runs the full length of
-    // its mounting edge parallel to the body axis. ---
-    const FlapFile flap_files[4] = {
-        {1, "fwd_top",    "Spacecraft Flap 1.STL", {4549.0, 37600.0, 12230.8}},
-        {2, "fwd_bottom", "Spacecraft Flap 2.STL", {4549.0, 37600.0, 3223.6}},
-        {3, "aft_top",    "Spacecraft Flap 3.STL", {4546.3, 4000.0, 12230.8}},
-        {4, "aft_bottom", "Spacecraft Flap 4.STL", {4551.2, 4000.0, 3223.5}},
-    };
-    for (const FlapFile& f : flap_files) {
-        const PanelMesh flap_raw = LoadMeshFromStl((dir / f.filename).string(), f.id);
+    // --- 4 flaps (see FlapHingeData.h for hinge point/filename data). Hinge
+    // axis is the body's nose-tail direction (model +X = CAD_Y) for all 4. ---
+    for (const FlapHingeInfo& f : FlapHingeTable()) {
+        const PanelMesh flap_raw = LoadMeshFromStl((dir / f.stl_filename).string(), f.group_id);
         AppendTransformed(flap_raw, geo.mesh);
 
         PanelGroup g;
-        g.id = f.id;
+        g.id = f.group_id;
         g.name = f.name;
-        g.hinge_point = ToModelFrame(f.hinge_cad_mm);
+        g.hinge_point = ToModelFrame(f.hinge_point_cad_mm);
         g.hinge_axis = Eigen::Vector3d::UnitX();
         geo.mesh.addGroup(g);
     }

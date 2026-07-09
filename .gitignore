@@ -61,9 +61,17 @@ compile_commands.json
 # vcpkg
 vcpkg_installed/
 
+# CFD Archives
+cfd/
+geometry/doe_points/
+
 # debug information files
 *.dwo
 
 # test output & cache
 Testing/
 .cache/
+
+# ANSYS Instances
+*.trn
+*.bat
