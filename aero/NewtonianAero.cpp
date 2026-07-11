@@ -93,4 +93,43 @@ AeroCoefficients NewtonianAeroModel::evaluate(
     return c;
 }
 
+std::array<double, 4> NewtonianAeroModel::evaluateHingeMoments(
+    const PanelMesh& mesh,
+    const std::unordered_map<int, double>& flap_deflections_rad, double alpha_rad,
+    double beta_rad, double mach_inf, double S_ref, double L_ref) const {
+    const double Cp_max = cpMax(mach_inf);
+    const Eigen::Vector3d V_hat = freestreamDirectionBody(alpha_rad, beta_rad);
+
+    const std::vector<Panel> panels = mesh.deflected(flap_deflections_rad);
+    const auto& groups = mesh.groups();
+
+    std::array<Eigen::Vector3d, 4> sum_M_over_q_per_flap = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()};
+
+    for (const Panel& p : panels) {
+        if (p.group_id < 1 || p.group_id > 4) continue;  // fixed body: no hinge moment
+        const double sin_theta = -V_hat.dot(p.normal);
+        if (sin_theta <= 0.0) continue;
+        const double Cp = Cp_max * sin_theta * sin_theta;
+        const Eigen::Vector3d dF_over_q = -Cp * p.area * p.normal;
+
+        const auto it = groups.find(p.group_id);
+        if (it == groups.end()) continue;
+        const Eigen::Vector3d r = p.centroid - it->second.hinge_point;
+        sum_M_over_q_per_flap[p.group_id - 1] += r.cross(dF_over_q);
+    }
+
+    std::array<double, 4> Ch{};
+    for (int i = 0; i < 4; ++i) {
+        const auto it = groups.find(i + 1);
+        if (it == groups.end()) {
+            Ch[i] = 0.0;
+            continue;
+        }
+        Ch[i] = sum_M_over_q_per_flap[i].dot(it->second.hinge_axis) / (S_ref * L_ref);
+    }
+    return Ch;
+}
+
 }  // namespace aero_model

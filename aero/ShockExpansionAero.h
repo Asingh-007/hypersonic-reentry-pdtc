@@ -7,13 +7,13 @@
 // local flow-deflection angle is treated as an isolated 2D wedge/expansion
 // corner (Anderson's "shock-expansion method", generalized panel-locally
 // like NASA's S/HABP code does).
-// Offline-only, like NewtonianAeroModel -- swept by aero/GenerateAeroTable.cpp
+// Offline-only, like NewtonianAeroModel, swept by aero/GenerateAeroTable.cpp
 // via AeroRegimeDispatch.h; DescentDynamics never calls this directly.
 
 #include <optional>
 #include <unordered_map>
 
-#include "NewtonianAero.h"  // AeroCoefficients, and cpMax() reuse for the detachment fallback
+#include "NewtonianAero.h" 
 #include "PanelGeometry.h"
 
 namespace aero_model {
@@ -34,7 +34,7 @@ double invertPrandtlMeyer(double nu_target, double gamma);
 // Solves the theta-beta-Mach relation (Anderson eq. 4.23) for the WEAK
 // oblique shock angle beta (radians), seeded near the Mach angle to bias
 // toward the physically-realized weak-shock root. Returns std::nullopt if
-// the shock is detached -- callers should fall back to another model.
+// the shock is detached as callers should fall back to another model.
 std::optional<double> solveWeakObliqueShockBeta(double mach_inf, double theta_rad, double gamma);
 
 // Body-axis convention and evaluate() semantics match NewtonianAeroModel;

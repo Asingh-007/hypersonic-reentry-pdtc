@@ -13,10 +13,6 @@
 
 namespace aero_model::testutil {
 
-// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
-// <cmath>/<math.h> include anywhere in the translation unit, which is
-// fragile to guarantee across header inclusion order -- use an explicit
-// local constant instead (same fix already applied in main.cpp).
 inline constexpr double kPi = 3.14159265358979323846;
 
 inline PanelMesh makeCylinderNoseFlapBody(int n_theta = 24, int n_axial = 10,

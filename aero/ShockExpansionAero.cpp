@@ -7,16 +7,12 @@ namespace aero_model {
 
 namespace {
 
-// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
-// <cmath>/<math.h> include anywhere in the translation unit -- use an
-// explicit local constant instead (same fix as elsewhere in this repo).
 constexpr double kPi = 3.14159265358979323846;
 
 constexpr double kNewtonTol = 1e-10;
 constexpr int kNewtonMaxIters = 50;
 
-// Residual of the theta-beta-Mach relation (Anderson eq. 4.23), rearranged
-// to f(beta) = 0:
+// Residual of the theta-beta-Mach relation, rearranged to f(beta) = 0:
 //   tan(theta) * [M1^2*(gamma+cos(2*beta)) + 2] = 2*cot(beta)*(M1^2*sin^2(beta) - 1)
 double thetaBetaMachResidual(double beta, double mach_inf, double theta_rad, double gamma) {
     const double M2 = mach_inf * mach_inf;
@@ -27,7 +23,7 @@ double thetaBetaMachResidual(double beta, double mach_inf, double theta_rad, dou
          - 2.0 * cotb * (M2 * sinb * sinb - 1.0);
 }
 
-// Direct (non-residual) forward evaluation of theta(beta) -- the same
+// Direct (non-residual) forward evaluation of theta(beta): the same
 // theta-beta-Mach relation, solved for theta given beta directly. Used
 // only for the cheap coarse-scan detachment pre-check below.
 double thetaOfBeta(double beta, double mach_inf, double gamma) {
@@ -40,7 +36,7 @@ double thetaOfBeta(double beta, double mach_inf, double gamma) {
 
 constexpr int kCoarseDetachmentSamples = 10;
 
-}  // namespace
+}
 
 double prandtlMeyerNu(double mach, double gamma) {
     double M2m1 = mach * mach - 1.0;
@@ -126,8 +122,7 @@ std::optional<double> solveWeakObliqueShockBeta(double mach_inf, double theta_ra
 }
 
 Eigen::Vector3d ShockExpansionAeroModel::freestreamDirectionBody(double alpha_rad, double beta_rad) const {
-    // Identical to NewtonianAeroModel::freestreamDirectionBody -- 3 lines,
-    // not worth sharing across a new abstraction.
+    // Identical to NewtonianAeroModel::freestreamDirectionBody -> 3 lines
     return Eigen::Vector3d(-std::cos(alpha_rad) * std::cos(beta_rad),
                             std::sin(beta_rad),
                             std::sin(alpha_rad) * std::cos(beta_rad));
@@ -137,7 +132,7 @@ double ShockExpansionAeroModel::panelCp(double mach_inf, double theta_rad) const
     if (theta_rad >= 0.0) {
         const auto beta = solveWeakObliqueShockBeta(mach_inf, theta_rad, gamma_);
         if (!beta) {
-            // Detached shock -- fall back to local Newtonian impact theory
+            // Detached shock -> fall back to local Newtonian impact theory
             // for this one panel, a bounded degradation that never produces
             // a NaN/undefined Cp.
             const NewtonianAeroModel local_newton(gamma_);
@@ -191,8 +186,7 @@ AeroCoefficients ShockExpansionAeroModel::evaluate(
     c.CN = CZ;
 
     // Body-to-wind axis transformation. NOTE: alpha-only, an accepted
-    // approximation at nonzero beta -- same documented limitation as
-    // NewtonianAeroModel::evaluate.
+    // approximation at nonzero beta
     c.CL = c.CN * std::cos(alpha_rad) - c.CA * std::sin(alpha_rad);
     c.CD = c.CN * std::sin(alpha_rad) + c.CA * std::cos(alpha_rad);
 

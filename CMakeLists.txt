@@ -29,14 +29,17 @@ file(GLOB_RECURSE SOURCE
   "${CMAKE_CURRENT_SOURCE_DIR}/attitude/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/attitude/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/aero/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/aero/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/loads/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/loads/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
 )
-# GenerateAeroTable.cpp and GenerateDeflectedGeometry.cpp each have their own
-# main() (offline tools, built as separate targets below) -- exclude them
-# from the main glob or multiple targets' main()s would collide when linked
-# together.
+# GenerateAeroTable.cpp, GenerateDeflectedGeometry.cpp, and StageDemoMain.cpp
+# each have their own main() (offline tools, built as separate targets below)
+# -- exclude them from the main glob or multiple targets' main()s would
+# collide when linked together.
 list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/aero/GenerateAeroTable.cpp")
 list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/aero/GenerateDeflectedGeometry.cpp")
+list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp/StageDemoMain.cpp")
+list(REMOVE_ITEM SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp/FullLoopDemoMain.cpp")
 
 add_executable(main ${SOURCE})
 target_include_directories(main PRIVATE
@@ -48,6 +51,7 @@ target_include_directories(main PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/attitude
   ${CMAKE_CURRENT_SOURCE_DIR}/aero
   ${CMAKE_CURRENT_SOURCE_DIR}/loads
+  ${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp
 )
 target_link_libraries (main Eigen3::Eigen Matplot++::matplot libclarabel_c_shared)
 
@@ -94,11 +98,89 @@ target_include_directories(deflected_geometry_gen PRIVATE
 target_link_libraries(deflected_geometry_gen PRIVATE Eigen3::Eigen)
 target_compile_features(deflected_geometry_gen PRIVATE cxx_std_17)
 
+# Standalone Stage A / Stage B demo + plotting executable (SCP guidance
+# reference-trajectory generation). Not run automatically; run manually to
+# visually sanity-check Stage A/B output.
+add_executable(stage_demo
+  guidance_scp/StageDemoMain.cpp
+  guidance_scp/ClarabelSocpSolver.cpp
+  guidance_scp/TrimSolver.cpp
+  guidance_scp/reference_stage_a.cpp
+  guidance_scp/reference_stage_b.cpp
+  planet/PlanetConfig.cpp
+  atmosphere/AtmosphereModel.cpp
+  dynamics/DescentDynamics.cpp
+  attitude/QuaternionUtils.cpp
+  aero/AeroCoefficientTable.cpp
+  aero/AeroAngles.cpp
+  loads/HeatingLoadModel.cpp
+)
+target_include_directories(stage_demo PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp
+  ${CMAKE_CURRENT_SOURCE_DIR}/planet
+  ${CMAKE_CURRENT_SOURCE_DIR}/atmosphere
+  ${CMAKE_CURRENT_SOURCE_DIR}/dynamics
+  ${CMAKE_CURRENT_SOURCE_DIR}/spacecraft
+  ${CMAKE_CURRENT_SOURCE_DIR}/attitude
+  ${CMAKE_CURRENT_SOURCE_DIR}/aero
+  ${CMAKE_CURRENT_SOURCE_DIR}/loads
+)
+target_link_libraries(stage_demo PRIVATE Eigen3::Eigen Matplot++::matplot libclarabel_c_shared)
+
+# Standalone full 2-phase coupled 6DOF SCP loop demo + plotting executable.
+# Not run automatically; run manually to visually sanity-check the full
+# loop's output looks physically reasonable.
+add_executable(full_loop_demo
+  guidance_scp/FullLoopDemoMain.cpp
+  guidance_scp/ClarabelSocpSolver.cpp
+  guidance_scp/TrimSolver.cpp
+  guidance_scp/reference_stage_a.cpp
+  guidance_scp/reference_stage_b.cpp
+  guidance_scp/FiniteDifferenceJacobian.cpp
+  guidance_scp/full_loop_phase1.cpp
+  guidance_scp/full_loop_phase2.cpp
+  guidance_scp/full_loop_path_constraints.cpp
+  guidance_scp/full_loop_nonconvex.cpp
+  guidance_scp/full_loop_transition.cpp
+  guidance_scp/full_loop_subproblem.cpp
+  guidance_scp/full_scp_loop.cpp
+  planet/PlanetConfig.cpp
+  atmosphere/AtmosphereModel.cpp
+  dynamics/DescentDynamics.cpp
+  attitude/QuaternionUtils.cpp
+  aero/AeroCoefficientTable.cpp
+  aero/AeroAngles.cpp
+  aero/AeroRegimeDispatch.cpp
+  aero/NewtonianAero.cpp
+  aero/PanelGeometry.cpp
+  aero/ShockExpansionAero.cpp
+  loads/HeatingLoadModel.cpp
+)
+target_include_directories(full_loop_demo PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp
+  ${CMAKE_CURRENT_SOURCE_DIR}/planet
+  ${CMAKE_CURRENT_SOURCE_DIR}/atmosphere
+  ${CMAKE_CURRENT_SOURCE_DIR}/dynamics
+  ${CMAKE_CURRENT_SOURCE_DIR}/spacecraft
+  ${CMAKE_CURRENT_SOURCE_DIR}/attitude
+  ${CMAKE_CURRENT_SOURCE_DIR}/aero
+  ${CMAKE_CURRENT_SOURCE_DIR}/loads
+)
+target_link_libraries(full_loop_demo PRIVATE Eigen3::Eigen Matplot++::matplot libclarabel_c_shared)
+
 add_executable(unit_tests
   tests/AtmosphereModelTests.cpp
   tests/DynamicsTests.cpp
   tests/AeroTests.cpp
   tests/HeatingLoadModelTests.cpp
+  tests/GuidanceScpTests.cpp
+  tests/FullLoopPhase1Tests.cpp
+  tests/FullLoopPhase2Tests.cpp
+  tests/FullLoopNonconvexTests.cpp
+  tests/FullLoopSubproblemTests.cpp
+  tests/FullLoopIntegrationTests.cpp
   atmosphere/AtmosphereModel.cpp
   dynamics/DescentDynamics.cpp
   attitude/QuaternionUtils.cpp
@@ -114,6 +196,18 @@ add_executable(unit_tests
   aero/AeroAngles.cpp
   aero/AeroCoefficientTable.cpp
   loads/HeatingLoadModel.cpp
+  guidance_scp/ClarabelSocpSolver.cpp
+  guidance_scp/TrimSolver.cpp
+  guidance_scp/reference_stage_a.cpp
+  guidance_scp/reference_stage_b.cpp
+  guidance_scp/FiniteDifferenceJacobian.cpp
+  guidance_scp/full_loop_phase1.cpp
+  guidance_scp/full_loop_phase2.cpp
+  guidance_scp/full_loop_path_constraints.cpp
+  guidance_scp/full_loop_nonconvex.cpp
+  guidance_scp/full_loop_transition.cpp
+  guidance_scp/full_loop_subproblem.cpp
+  guidance_scp/full_scp_loop.cpp
 )
 target_include_directories(unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -124,8 +218,9 @@ target_include_directories(unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/attitude
   ${CMAKE_CURRENT_SOURCE_DIR}/aero
   ${CMAKE_CURRENT_SOURCE_DIR}/loads
+  ${CMAKE_CURRENT_SOURCE_DIR}/guidance_scp
 )
-target_link_libraries(unit_tests PRIVATE Eigen3::Eigen GTest::gtest GTest::gtest_main)
+target_link_libraries(unit_tests PRIVATE Eigen3::Eigen GTest::gtest GTest::gtest_main libclarabel_c_shared)
 target_compile_definitions(unit_tests PRIVATE TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 include(GoogleTest)
 gtest_discover_tests(unit_tests)
@@ -139,5 +234,19 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${clarabelcpp_SOURCE_DIR}/rust_wrapper/target/debug/clarabel_c.dll"
       "$<TARGET_FILE_DIR:main>"
+  )
+  # unit_tests now also links libclarabel_c_shared (guidance_scp tests) --
+  # needs the same DLL copy.
+  add_custom_command(
+    TARGET unit_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${clarabelcpp_SOURCE_DIR}/rust_wrapper/target/debug/clarabel_c.dll"
+      "$<TARGET_FILE_DIR:unit_tests>"
+  )
+  add_custom_command(
+    TARGET full_loop_demo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${clarabelcpp_SOURCE_DIR}/rust_wrapper/target/debug/clarabel_c.dll"
+      "$<TARGET_FILE_DIR:full_loop_demo>"
   )
 endif()

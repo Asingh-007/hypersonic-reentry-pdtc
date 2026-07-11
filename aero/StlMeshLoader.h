@@ -12,14 +12,8 @@ namespace aero_model {
 // CAD tools such as SolidWorks) into a PanelMesh. Every triangle in the file
 // becomes one Panel with the given group_id (0 = fixed body by default;
 // pass a nonzero id and register a matching PanelGroup separately if the
-// imported geometry represents a deflectable surface -- STL has no concept
+// imported geometry represents a deflectable surface -> STL has no concept
 // of hinge groups, so that metadata must be added by hand after loading).
-//
-// Binary STL is NOT supported (flagged follow-up work -- some binary STL
-// exporters also start their 80-byte header with the literal bytes "solid",
-// which would fool the "starts with solid" check below into misparsing a
-// binary file as ASCII; this is a known, accepted limitation of the
-// ASCII-only scope here, not something silently handled).
 //
 // Malformed files raise std::runtime_error with a line-number-anchored
 // message rather than silently producing a garbage or empty mesh.

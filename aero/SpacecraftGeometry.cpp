@@ -9,14 +9,11 @@ namespace aero_model {
 
 namespace {
 
-// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
-// <cmath>/<math.h> include anywhere in the translation unit -- use an
-// explicit local constant instead (same fix as elsewhere in this repo).
 constexpr double kPi = 3.14159265358979323846;
 
 constexpr double kMmToM = 1.0 / 1000.0;  // STL export uses mm; this codebase uses meters throughout.
 
-// model_x=CAD_Y (nose-tail, +model_x=nose), model_y=-CAD_X, model_z=CAD_Z --
+// model_x=CAD_Y (nose-tail, +model_x=nose), model_y=-CAD_X, model_z=CAD_Z ->
 // verified right-handed (model_x cross model_y = model_z).
 Eigen::Vector3d ToModelFrame(const Eigen::Vector3d& cad) {
     return Eigen::Vector3d(cad.y(), -cad.x(), cad.z()) * kMmToM;
@@ -32,7 +29,7 @@ void AppendTransformed(const PanelMesh& mesh, PanelMesh& out) {
     }
 }
 
-}  // namespace
+}
 
 SpacecraftGeometry LoadSpacecraftGeometry(const std::string& geometry_dir) {
     namespace fs = std::filesystem;
@@ -40,12 +37,11 @@ SpacecraftGeometry LoadSpacecraftGeometry(const std::string& geometry_dir) {
 
     SpacecraftGeometry geo;
 
-    // --- Body (group 0, fixed) ---
+    // Body (group 0, fixed)
     const PanelMesh body_raw = LoadMeshFromStl((dir / kSpacecraftBodyStlFilename).string(), 0);
     AppendTransformed(body_raw, geo.mesh);
 
-    // --- 4 flaps (see FlapHingeData.h for hinge point/filename data). Hinge
-    // axis is the body's nose-tail direction (model +X = CAD_Y) for all 4. ---
+    // 4 flaps, Hinge axis is the body's nose-tail direction (model +X = CAD_Y) for all 4
     for (const FlapHingeInfo& f : FlapHingeTable()) {
         const PanelMesh flap_raw = LoadMeshFromStl((dir / f.stl_filename).string(), f.group_id);
         AppendTransformed(flap_raw, geo.mesh);
@@ -58,9 +54,9 @@ SpacecraftGeometry LoadSpacecraftGeometry(const std::string& geometry_dir) {
         geo.mesh.addGroup(g);
     }
 
-    // --- Reference quantities: PLACEHOLDER geometric proxies (true CG
+    // Reference quantities: PLACEHOLDER geometric proxies (true CG
     // needs mass distribution, not pure geometry), derived from the body
-    // mesh's (group 0 only, flaps excluded) bounding box. ---
+    // mesh's (group 0 only, flaps excluded) bounding box.
     Eigen::Vector3d bmin = Eigen::Vector3d::Constant(std::numeric_limits<double>::max());
     Eigen::Vector3d bmax = Eigen::Vector3d::Constant(std::numeric_limits<double>::lowest());
     for (const Panel& p : geo.mesh.panels()) {

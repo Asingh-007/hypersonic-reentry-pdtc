@@ -20,7 +20,7 @@ Eigen::Vector3d rotateAboutHinge(const Eigen::Vector3d& p,
     return hinge_point + rotated;
 }
 
-}  // namespace
+}
 
 std::vector<Panel> PanelMesh::deflected(
     const std::unordered_map<int, double>& deflections) const {

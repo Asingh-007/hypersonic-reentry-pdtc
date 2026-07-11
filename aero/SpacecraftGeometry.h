@@ -12,7 +12,7 @@
 // The STL export's own axes (X/Z lateral, Y the body's long axis, units
 // mm) don't match this codebase's convention (X nose-tail, meters), so
 // every vertex is remapped/rescaled on import: model_x=y_cad/1000 (nose
-// at +Y_cad -- confirmed by the body tapering to a point over its last
+// at +Y_cad as confirmed by the body tapering to a point over its last
 // ~10m), model_y=-x_cad/1000, model_z=z_cad/1000 (chosen to keep the
 // frame right-handed).
 
@@ -24,9 +24,9 @@ namespace aero_model {
 
 struct SpacecraftGeometry {
     PanelMesh mesh;
-    double S_ref = 0.0;         // frontal area, m^2 -- PLACEHOLDER (pi * body_radius^2)
-    double L_ref = 0.0;         // reference length, m -- PLACEHOLDER (2 * body_radius)
-    double body_radius = 0.0;   // effective body radius, m -- PLACEHOLDER, for the subsonic Hoerner/Allen-Perkins correlations
+    double S_ref = 0.0;         // frontal area, m^2          PLACEHOLDER (pi * body_radius^2)
+    double L_ref = 0.0;         // reference length, m        PLACEHOLDER (2 * body_radius)
+    double body_radius = 0.0;   // effective body radius, m   PLACEHOLDER, for the subsonic Hoerner/Allen-Perkins correlations
     double body_length = 0.0;   // body length, m
     Eigen::Vector3d moment_ref = Eigen::Vector3d::Zero();  // bounding-box-center CG PLACEHOLDER, body frame, m
 };

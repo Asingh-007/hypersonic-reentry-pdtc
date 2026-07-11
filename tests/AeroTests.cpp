@@ -132,6 +132,27 @@ TEST(AeroRegimeDispatchTest, AftDifferentialFlapProducesNonzeroRollInExpectedDir
     EXPECT_NEAR(c.Cl_roll, -c_neg.Cl_roll, 1e-9);
 }
 
+TEST(NewtonianAeroModelTest, HingeMomentMagnitudeGrowsWithFlapDeflectionIntoFlow) {
+    // Flap group 1 (fwd_left, mounted on the body's +z/"top" side, flat and
+    // parallel to the flow at zero deflection) needs the flow hitting that
+    // side to be windward at all -- negative alpha (nose pitched down)
+    // points the top surface into the oncoming flow. Deflecting the flap
+    // further (positive rotation about its +Y hinge axis) increases its
+    // local incidence further, so its own hinge moment should grow in
+    // magnitude.
+    PanelMesh mesh = testutil::makeCylinderNoseFlapBody();
+    NewtonianAeroModel model;
+    double S_ref = kPi * 4.5 * 4.5, L_ref = 9.0;
+
+    std::array<double, 4> ch_small = model.evaluateHingeMoments(
+        mesh, {{1, 0.05}, {2, 0.0}, {3, 0.0}, {4, 0.0}}, /*alpha_rad=*/-0.1, 0.0, 5.0, S_ref, L_ref);
+    std::array<double, 4> ch_large = model.evaluateHingeMoments(
+        mesh, {{1, 0.3}, {2, 0.0}, {3, 0.0}, {4, 0.0}}, /*alpha_rad=*/-0.1, 0.0, 5.0, S_ref, L_ref);
+
+    EXPECT_NE(ch_small[0], 0.0);
+    EXPECT_GT(std::abs(ch_large[0]), std::abs(ch_small[0]));
+}
+
 // ---------------------------------------------------------------------
 // Real spacecraft geometry (SolidWorks STL import)
 // ---------------------------------------------------------------------
@@ -424,7 +445,10 @@ TEST(FlapHingeDataTest, DeflectingAFlapAboutItsHingeInCadFramePreservesRadiusFro
 // Fixture (tests/fixtures/aero_table_test.csv): 2^6=64-row complete grid
 // with simple linear per-axis formulas (CL=0.01*alpha_deg, CD=0.3,
 // Cl_roll=0.001*beta_deg+0.002*aft_diff_deg, Cm=-0.02*alpha_deg,
-// Cn_yaw=0.001*beta_deg) chosen so expected values are trivially hand-verifiable.
+// Cn_yaw=0.001*beta_deg, Ch1=Ch2=Cm/4+0.001*fwd_sym_deg,
+// Ch3=Ch4=Cm/4+0.001*aft_sym_deg -- genuine flap-axis dependence, needed by
+// FullLoopPhase1Tests.cpp's B_flap-scales-with-qbar check) chosen so
+// expected values are trivially hand-verifiable.
 
 TEST(AeroCoefficientTableTest, ExactMatchAtGridNodes) {
     AeroCoefficientTable table;
@@ -435,6 +459,7 @@ TEST(AeroCoefficientTableTest, ExactMatchAtGridNodes) {
     EXPECT_NEAR(c.Cl_roll, -0.015, 1e-9);  // 0.001*(-5) + 0.002*(-5)
     EXPECT_NEAR(c.Cm, 0.2, 1e-9);
     EXPECT_NEAR(c.Cn_yaw, -0.005, 1e-9);
+    for (double ch : c.Ch) EXPECT_NEAR(ch, 0.045, 1e-9);  // Cm/4 + 0.001*(-5), fwd_sym==aft_sym==-5 here
 }
 
 TEST(AeroCoefficientTableTest, SaneInterpolationBetweenNodes) {

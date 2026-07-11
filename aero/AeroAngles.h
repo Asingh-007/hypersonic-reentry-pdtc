@@ -3,7 +3,7 @@
 
 #include <Eigen/Geometry>
 
-// Derives 3D angle of attack (alpha) and sideslip (beta) from the vehicle's
+// 3D angle of attack (alpha) and sideslip (beta) are derived from the vehicle's
 // translational flight-path state and attitude quaternion.
 
 struct AeroAngles {
@@ -13,5 +13,10 @@ struct AeroAngles {
 
 AeroAngles ComputeAeroAngles(const Eigen::Quaterniond& q_body_to_local,
                               double fpa, double v_azi);
+
+// Overload taking the velocity direction (unit vector) directly in
+// frame q_body_to_local's rotation is defined against
+AeroAngles ComputeAeroAngles(const Eigen::Quaterniond& q_body_to_local,
+                              const Eigen::Vector3d& v_hat_local);
 
 #endif // AERO_ANGLES_H

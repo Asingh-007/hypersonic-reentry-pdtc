@@ -10,7 +10,7 @@
 // below improves the raw LHS draw so points aren't accidentally clustered
 // or nearly collinear in the joint space.
 //
-// NOTE: this is an OFFLINE-only utility (see aero/GenerateAeroTable.cpp) --
+// NOTE: this is an OFFLINE-only utility (see aero/GenerateAeroTable.cpp)
 // DescentDynamics never calls this at runtime.
 
 #include <Eigen/Dense>

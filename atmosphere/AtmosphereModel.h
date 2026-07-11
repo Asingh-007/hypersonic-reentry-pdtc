@@ -31,21 +31,23 @@ class EarthAtmosphere1976 {
 public:
     static AtmosphereState Compute(double geometric_altitude_m);
 
-private:
     static constexpr double kSeaLevelDensity = 1.225; // kg/m^3
     // Exponential decay rate for h < 84 km. Not given directly by Table 2;
     // chosen (matching a prior placeholder value) to be nearly continuous
     // with the bridge's first sub-layer at h=84km (residual discontinuity
     // ~2%, which is an inherent feature of stitching an independent
     // low-altitude fit to Table 2's piecewise-polytropic bridge, not a bug).
+    // Public (not private) since guidance_scp's path-constraint gradients
+    // need d(rho)/dr = -kBeta*rho directly (see reference_stage_a.cpp).
     static constexpr double kBeta = 0.14e-3;
+    static constexpr double kLowAltitudeTopM = 84000.0; // exponential-regime upper bound
 
+private:
     // Reference Earth radius used in the bridge formula's (h-h_i)/r_earth
     // term -- the same mean radius used elsewhere in this codebase
     // (PlanetConfig::Earth().radius), not the WGS-84 geopotential constant.
     static constexpr double kEarthRadiusM = 6371000.0;
 
-    static constexpr double kLowAltitudeTopM = 84000.0;
     static constexpr double kBridgeTopM = 120000.0;
     static constexpr double kCurveFitTopM = 1000000.0;
 

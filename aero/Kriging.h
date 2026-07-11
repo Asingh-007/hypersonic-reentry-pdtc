@@ -14,7 +14,7 @@
 // mean reverts to the Newtonian trend far from any CFD anchor and locks
 // onto the CFD-corrected value near anchors, with a posterior variance
 // that grows with distance from the nearest anchors -- useful for
-// adaptive DOE refinement (see LatinHypercubeSampler.h).
+// adaptive DOE refinement
 //
 // Kernel: anisotropic Matern 5/2, one length scale per input dimension
 // (e.g. Mach, alpha, flap deflection), which is the standard choice for
@@ -22,11 +22,10 @@
 // like squared-exponential, which tends to over-smooth shock-driven
 // nonlinearities).
 //
-// NOTE: this is an OFFLINE-only utility (see aero/GenerateAeroTable.cpp) --
+// NOTE: this is an OFFLINE-only utility
 // DescentDynamics never calls this at runtime, only a precomputed
 // AeroCoefficientTable. No real CFD data exists yet, so this is not
-// currently wired into the table generator's output; see the "FUTURE WORK"
-// comment block in GenerateAeroTable.cpp for the intended hook.
+// currently wired into the table generator's output
 
 #include <Eigen/Dense>
 #include <functional>

@@ -4,14 +4,14 @@
 // AeroRegimeDispatch.h) over a (Mach, alpha_deg, beta_deg, fwd_sym_deg,
 // aft_sym_deg, aft_diff_deg) grid, writes a CSV lookup table, and writes/
 // prints a suggested LHS-DOE CFD anchor-point matrix for future real
-// Fluent runs. No Kriging correction is applied -- no real CFD data exists
+// Fluent runs. No Kriging correction is applied as no real CFD data exists
 // yet, so this is the raw dispatched-model evaluation (see FUTURE WORK at
 // the bottom).
 //
 // Pass --doe-only to (re)generate aero/data/doe_points.csv and
 // reference_quantities.csv (mesh load only, a few seconds) without
 // re-running the full grid sweep (tens of minutes for the real spacecraft
-// geometry) -- useful for downstream tooling like GenerateDeflectedGeometry.cpp
+// geometry), useful for downstream tooling like GenerateDeflectedGeometry.cpp
 // and cfd/run_doe_point.py that only need those two files.
 
 #include <filesystem>
@@ -30,9 +30,6 @@
 
 using namespace aero_model;
 
-// MSVC only defines M_PI when _USE_MATH_DEFINES is set before the first
-// <cmath>/<math.h> include anywhere in the translation unit -- use an
-// explicit local constant instead (same fix as main.cpp).
 constexpr double kPi = 3.14159265358979323846;
 
 int main(int argc, char** argv) {
@@ -47,11 +44,11 @@ int main(int argc, char** argv) {
     const std::filesystem::path data_dir = source_dir / "data";
     std::filesystem::create_directories(data_dir);
 
-    // --- 1. Suggested CFD anchor-point matrix (LHS-DOE) for future real
-    // Fluent runs -- not used to fabricate any correction here. Mach bounds
+    // Suggested CFD anchor-point matrix (LHS-DOE) for future real
+    // Fluent runs, not used to fabricate any correction here. Mach bounds
     // span the full 0.2-12 envelope since CFD is most needed where no
     // theory applies (transonic/subsonic); kept at 3 variables (mach,
-    // alpha_deg, aft_sym_deg -- the most operationally significant flap
+    // alpha_deg, aft_sym_deg as the most operationally significant flap
     // axis) rather than all 6, with fwd_sym_deg/aft_diff_deg left for later.
     // Runs first (independent of the mesh/grid sweep below) so --doe-only
     // can regenerate it cheaply. ---
@@ -90,7 +87,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "Wrote DOE points to " << doe_csv_path << std::endl;
 
-    // --- 2. Build the vehicle mesh ---
+    // Vehicle Mesh Construction
     // Default: the real SolidWorks-exported geometry under geometry/ (see
     // SpacecraftGeometry.h). A non-flag argv, if given, overrides with a
     // single STL file instead (body-only, no flap groups).
@@ -127,9 +124,7 @@ int main(int argc, char** argv) {
 
     // Written so downstream tooling (e.g. cfd/run_doe_point.py) reads these
     // once-computed values instead of hardcoding a second copy that could
-    // drift out of sync. moment_ref is in this codebase's model frame
-    // (meters, +X=nose) -- see SpacecraftGeometry.h for the CAD-frame
-    // conversion needed before using it as a Fluent moment center.
+    // drift out of sync. moment_ref is in this codebase's model frame: W(meters, +X=nose)
     {
         std::ofstream ref_out((data_dir / "reference_quantities.csv").string());
         ref_out << "S_ref,L_ref,body_radius,body_length,moment_ref_x,moment_ref_y,moment_ref_z\n"
@@ -142,11 +137,11 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // --- 3. Define the grid envelope ---
-    // PLACEHOLDER ranges/resolution -- revisit once real mission envelopes
+    // Grid Envelope Definition
+    // PLACEHOLDER ranges/resolution, needs to berevisited once real mission envelopes
     // are known. mach_grid spans 0.2-12 (at least one point per regime) so
     // the subsonic/transonic placeholders are actually exercised in the
-    // committed CSV, not just dead code -- this vehicle's tower-catch
+    // committed CSV, not just dead code. This vehicle's tower-catch
     // phase is entirely subsonic. Total: 17*8*5*5^3 = 85,000 rows.
     const std::vector<double> mach_grid = {0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 2, 3, 4,
                                             5, 6, 7, 8, 9, 10, 11, 12};
@@ -162,7 +157,8 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to open " << csv_path << " for writing." << std::endl;
         return 1;
     }
-    out << "mach,alpha_deg,beta_deg,fwd_sym_deg,aft_sym_deg,aft_diff_deg,CL,CD,Cl_roll,Cm,Cn_yaw\n";
+    out << "mach,alpha_deg,beta_deg,fwd_sym_deg,aft_sym_deg,aft_diff_deg,CL,CD,Cl_roll,Cm,Cn_yaw,"
+           "Ch1,Ch2,Ch3,Ch4\n";
     out << std::setprecision(17);
 
     long long row_count = 0;
@@ -187,7 +183,8 @@ int main(int argc, char** argv) {
 
                             out << mach << "," << alpha_deg << "," << beta_deg << ","
                                 << fwd_sym_deg << "," << aft_sym_deg << "," << aft_diff_deg << ","
-                                << c.CL << "," << c.CD << "," << c.Cl_roll << "," << c.Cm << "," << c.Cn_yaw << "\n";
+                                << c.CL << "," << c.CD << "," << c.Cl_roll << "," << c.Cm << "," << c.Cn_yaw << ","
+                                << c.Ch[0] << "," << c.Ch[1] << "," << c.Ch[2] << "," << c.Ch[3] << "\n";
                             ++row_count;
                         }
                     }
@@ -201,11 +198,10 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-// ---------------------------------------------------------------------
 // FUTURE WORK (not implemented -- no real CFD data exists yet): once Fluent
 // results exist at the DOE points above, fit a UniversalKriging per
 // coefficient (per regime, since the trend function is regime-dependent)
 // on the CFD residuals, re-evaluate over the same 6D grid using
 // krig.predict() instead of evaluateAeroRegime(), and overwrite this CSV --
 // AeroCoefficientTable/DescentDynamics need zero code changes for that.
-// ---------------------------------------------------------------------
+

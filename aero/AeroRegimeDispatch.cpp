@@ -9,15 +9,14 @@ namespace aero_model {
 
 namespace {
 
-// PLACEHOLDER: Hoerner, "Fluid-Dynamic Drag" (1965), Ch. 3 -- CD~0.8 for a
-// blunt-nosed cylindrical body at this fineness ratio (40m/9m=4.44), from
-// the lower-middle of Hoerner's commonly cited 0.8-1.3 range.
+// PLACEHOLDER: Hoerner CD~0.8 for a
+// blunt-nosed cylindrical body at this fineness ratio (40m/9m=4.44)
 constexpr double kHoernerCD0Baseline = 0.8;
 
 constexpr double kCdc = 1.2;            // 2D circular-cylinder crossflow Cd, subcritical Re
 constexpr double kEtaCrossflow = 0.75;  // Allen & Perkins end-effect factor, L/D~4.4
 
-}  // namespace
+}
 
 MachRegime classifyMachRegime(double mach_inf) {
     if (mach_inf < kMachSubsonicUpper) return MachRegime::kSubsonic;
@@ -36,13 +35,20 @@ std::unordered_map<int, double> mapFlapAxesToGroupDeflections(
     };
 }
 
+FlapAxes mapGroupDeflectionsToFlapAxes(double d1, double d2, double d3, double d4) {
+    // Exact algebraic inverse of mapFlapAxesToGroupDeflections above: an
+    // approximation when d1 != d2 (fwd_sym only has one degree of freedom in
+    // the aero table)
+    return FlapAxes{(d1 + d2) / 2.0, (d3 + d4) / 2.0, d3 - d4};
+}
+
 AeroCoefficients subsonicPlaceholderAero(double alpha_rad, double /*beta_rad*/,
                                           double body_radius, double body_length,
                                           double S_ref, double L_ref) {
     // Allen & Perkins (NACA TR 1048) slender-body crossflow normal force:
-    //   CN = 2*sin(alpha)*cos(alpha) + eta*Cdc*sin^2(alpha)*(S_planform/S_ref)
+    // CN = 2*sin(alpha)*cos(alpha) + eta*Cdc*sin^2(alpha)*(S_planform/S_ref)
     // Beta-dependence and alpha-dependence of the axial force are out of
-    // scope for this placeholder (documented simplification -- see header).
+    // scope for this placeholder
     const double S_planform = 2.0 * body_radius * body_length;
     const double sin_a = std::sin(alpha_rad);
     const double cos_a = std::cos(alpha_rad);
@@ -58,7 +64,7 @@ AeroCoefficients subsonicPlaceholderAero(double alpha_rad, double /*beta_rad*/,
     c.Cl_roll = 0.0;
     c.Cm = 0.0;
     c.Cn_yaw = 0.0;
-    (void)L_ref;  // not needed by this placeholder -- moments are zero-trend
+    (void)L_ref;  // not needed by this placeholder as moments are zero-trend
     return c;
 }
 
@@ -97,6 +103,9 @@ AeroCoefficients evaluateAeroRegime(const PanelMesh& mesh,
             return transonicPlaceholderAero(mesh, flap_deflections_rad, alpha_rad, beta_rad, mach_inf,
                                               moment_ref, S_ref, L_ref, body_radius, body_length);
         case MachRegime::kSupersonic: {
+            // TODO: no hinge-moment model for ShockExpansionAeroModel yet
+            // Ch stays at its zero-trend default here (acceptable: Phase 1
+            // spends the large majority of its trajectory at M>=5).
             const ShockExpansionAeroModel wedge;
             return wedge.evaluate(mesh, flap_deflections_rad, alpha_rad, beta_rad, mach_inf,
                                     moment_ref, S_ref, L_ref);
@@ -104,8 +113,14 @@ AeroCoefficients evaluateAeroRegime(const PanelMesh& mesh,
         case MachRegime::kHypersonic:
         default: {
             const NewtonianAeroModel newton;
-            return newton.evaluate(mesh, flap_deflections_rad, alpha_rad, beta_rad, mach_inf,
-                                     moment_ref, S_ref, L_ref);
+            AeroCoefficients c = newton.evaluate(mesh, flap_deflections_rad, alpha_rad, beta_rad, mach_inf,
+                                                   moment_ref, S_ref, L_ref);
+            // Hinge moments are only modeled in this (Newtonian/hypersonic)
+            // regime, where Phase 1 spends the large majority of its
+            // trajectory. Subsonic/transonic/supersonic all leave Ch at its zero-trend default
+            c.Ch = newton.evaluateHingeMoments(mesh, flap_deflections_rad, alpha_rad, beta_rad,
+                                                 mach_inf, S_ref, L_ref);
+            return c;
         }
     }
 }

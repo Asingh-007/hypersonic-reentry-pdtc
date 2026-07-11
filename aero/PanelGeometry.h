@@ -12,12 +12,6 @@
 // in TestBodyGenerator.h or by importing a real triangulated export from
 // OpenVSP/OpenRocket/CAD via StlMeshLoader.h.
 //
-// Namespaced under aero_model as a deliberate, flagged exception to this
-// repo's usual no-namespace convention -- this module introduces enough new
-// types (Panel, PanelGroup, PanelMesh, AeroCoefficients, NewtonianAeroModel,
-// UniversalKriging, DesignVariable, LatinHypercubeSampler, AeroCoefficientTable,
-// AeroAngles, ...) that keeping them scoped avoids global-namespace collision
-// risk.
 
 #include <Eigen/Dense>
 #include <string>

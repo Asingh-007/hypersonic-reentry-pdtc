@@ -1,10 +1,9 @@
 #ifndef FLAP_HINGE_DATA_H
 #define FLAP_HINGE_DATA_H
-// FlapHingeData.h
-//
 // Shared source of truth for the 4 real spacecraft flaps' file names and
-// hinge geometry, in the STL export's own (CAD) frame -- units mm, hinge
-// axis along CAD_Y (the body's long axis; see SpacecraftGeometry.h for why).
+// hinge geometry, in the STL export's CAD frame in units of mm, hinge
+// axis along CAD_Y (the body's long axis)
+//
 // Used by SpacecraftGeometry.cpp (which converts to this codebase's model
 // frame for aero analysis) and GenerateDeflectedGeometry.cpp (which rotates
 // flap STLs directly in the CAD frame for CFD geometry export), so the

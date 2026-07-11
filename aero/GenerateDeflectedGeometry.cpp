@@ -8,14 +8,12 @@
 // (mm, hinge axis = CAD_Y).
 //
 // Writes both a combined multi-solid assembly.stl (5 "solid...endsolid"
-// blocks in one file -- kept for reference/debugging) AND 5 separate
-// per-part files (spacecraft_body.stl, fwd_top.stl, etc.) -- the latter
+// blocks in one file as kept for reference/debugging) AND 5 separate
+// per-part files (spacecraft_body.stl, fwd_top.stl, etc.) as the latter
 // are what cfd/union_geometry.py actually consumes, since it needs each
 // part as an independent mesh to Boolean-union into one watertight solid
 // (the parts overlap at the flap mount points, a normal CAD-assembly
-// mating practice that isn't watertight on its own -- see this repo's CFD
-// pipeline notes for why Fluent's meshing workflows couldn't resolve that
-// overlap directly).
+// mating practice that isn't watertight on its own
 
 #include <filesystem>
 #include <fstream>

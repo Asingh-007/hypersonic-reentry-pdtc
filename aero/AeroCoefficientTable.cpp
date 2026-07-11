@@ -10,7 +10,7 @@ namespace aero_model {
 
 namespace {
 
-constexpr int kNumCoeffCols = 5;  // CL, CD, Cl_roll, Cm, Cn_yaw
+constexpr int kNumCoeffCols = 9;  // CL, CD, Cl_roll, Cm, Cn_yaw, Ch1, Ch2, Ch3, Ch4
 
 std::vector<double> sortedUnique(std::vector<double> v) {
     std::sort(v.begin(), v.end());
@@ -27,7 +27,7 @@ int indexOf(const std::vector<double>& grid, double value) {
     return -1;
 }
 
-}  // namespace
+}
 
 bool AeroCoefficientTable::load(const std::string& csv_path) {
     std::ifstream file(csv_path);
@@ -39,8 +39,7 @@ bool AeroCoefficientTable::load(const std::string& csv_path) {
     if (!std::getline(file, line)) {
         throw std::runtime_error("AeroCoefficientTable::load: " + csv_path + " is empty");
     }
-    // Header line is read but not otherwise validated beyond existing --
-    // column order is fixed by this class' documented format.
+    // Header line is read but not otherwise validated beyond existing, column order is fixed
 
     std::vector<std::array<double, kNumAxes>> axis_cols;
     std::vector<AeroCoefficients> coeff_col;
@@ -69,6 +68,10 @@ bool AeroCoefficientTable::load(const std::string& csv_path) {
         c.Cl_roll = vals[kNumAxes + 2];
         c.Cm = vals[kNumAxes + 3];
         c.Cn_yaw = vals[kNumAxes + 4];
+        c.Ch[0] = vals[kNumAxes + 5];
+        c.Ch[1] = vals[kNumAxes + 6];
+        c.Ch[2] = vals[kNumAxes + 7];
+        c.Ch[3] = vals[kNumAxes + 8];
         coeff_col.push_back(c);
     }
 
@@ -156,6 +159,7 @@ AeroCoefficients AeroCoefficientTable::interpolate(double mach, double alpha_deg
     }
 
     double CL = 0, CD = 0, Cl_roll = 0, Cm = 0, Cn_yaw = 0;
+    std::array<double, 4> Ch = {0.0, 0.0, 0.0, 0.0};
     const unsigned num_corners = 1u << kNumAxes;
     for (unsigned mask = 0; mask < num_corners; ++mask) {
         double w = 1.0;
@@ -172,6 +176,7 @@ AeroCoefficients AeroCoefficientTable::interpolate(double mach, double alpha_deg
         Cl_roll += w * c.Cl_roll;
         Cm += w * c.Cm;
         Cn_yaw += w * c.Cn_yaw;
+        for (int j = 0; j < 4; ++j) Ch[j] += w * c.Ch[j];
     }
 
     AeroCoefficients out;
@@ -180,6 +185,7 @@ AeroCoefficients AeroCoefficientTable::interpolate(double mach, double alpha_deg
     out.Cl_roll = Cl_roll;
     out.Cm = Cm;
     out.Cn_yaw = Cn_yaw;
+    out.Ch = Ch;
     return out;
 }
 
