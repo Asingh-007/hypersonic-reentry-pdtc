@@ -23,8 +23,8 @@
 
 struct AtmosphereState {
     double density = 0.0;     // kg/m^3
-    double pressure = 0.0;    // Pa -- not modeled by EarthAtmosphere1976 (see above); always 0 there
-    double temperature = 0.0; // K  -- not modeled by EarthAtmosphere1976 (see above); always 0 there
+    double pressure = 0.0;    // Pa -> not modeled by EarthAtmosphere1976 (see above); always 0 there
+    double temperature = 0.0; // K  -> not modeled by EarthAtmosphere1976 (see above); always 0 there
 };
 
 class EarthAtmosphere1976 {
@@ -44,7 +44,7 @@ public:
 
 private:
     // Reference Earth radius used in the bridge formula's (h-h_i)/r_earth
-    // term -- the same mean radius used elsewhere in this codebase
+    // term as the same mean radius used elsewhere in this codebase
     // (PlanetConfig::Earth().radius), not the WGS-84 geopotential constant.
     static constexpr double kEarthRadiusM = 6371000.0;
 
@@ -59,10 +59,6 @@ private:
         double delta_h;
     };
     static const std::array<BridgeLayer, 3>& BridgeLayerTable();
-    // The table's printed ranges (84-90, 91-106, 107-120 km) leave 1 km gaps
-    // at the seams (90-91, 106-107) that are almost certainly a rounding
-    // artifact in the source table, not a real coverage gap -- resolved here
-    // by switching sub-layers at each layer's own upper bound (90/106/120 km).
     static const BridgeLayer& FindBridgeLayer(double h_m);
 
     static AtmosphereState LowAltitudeModel(double z_geometric_m);
